@@ -1,64 +1,63 @@
-import { BaseRepository, RepositoryInfo, AccessValidation, CloneOptions, CloneResult } from './base-repository'
+import { simpleGit, SimpleGit } from 'simple-git'
+import * as fs from 'fs-extra'
+import * as path from 'path'
 
-export { RepositoryInfo, AccessValidation, CloneOptions, CloneResult }
+export interface RepositoryInfo {
+  owner: string
+  repo: string
+  branch: string
+}
 
-export class GitLabRepository extends BaseRepository {
-  protected getDefaultBranch(): string {
-    return 'main' // GitLab typically uses main as default
+export interface AccessValidation {
+  accessible: boolean
+  isPublic: boolean
+  error?: string
+  retryable?: boolean
+  retryAfter?: number
+}
+
+export interface CloneOptions {
+  branch?: string
+  depth?: number
+  clean?: boolean
+  retries?: number
+}
+
+export interface CloneResult {
+  success: boolean
+  path?: string
+  error?: string
+  details?: {
+    url: string
+    targetPath: string
+    attempt: number
+    duration?: number
+  }
+}
+
+/**
+ * Abstract base class for repository operations
+ * Contains all common functionality shared between GitHub and GitLab
+ */
+export abstract class BaseRepository {
+  protected git: SimpleGit
+
+  constructor() {
+    this.git = simpleGit()
   }
 
   /**
-   * Parse a GitLab repository URL and extract owner, repo, and branch information
+   * Parse a repository URL and extract owner, repo, and branch information
+   * This method must be implemented by each platform-specific class
    */
-  parseRepositoryUrl(url: string): RepositoryInfo {
-    if (!url || typeof url !== 'string') {
-      throw new Error('Invalid GitLab repository URL: URL cannot be empty')
-    }
+  abstract parseRepositoryUrl(url: string): RepositoryInfo
 
-    // Remove trailing slashes and .git suffix
-    const cleanUrl = url.replace(/\/$/, '').replace(/\.git$/, '')
-
-    // Match HTTPS URLs for gitlab.com
-    const httpsMatch = cleanUrl.match(/^https:\/\/gitlab\.com\/([^\/]+)\/([^\/]+)(?:\/-\/tree\/(.+))?$/)
-    if (httpsMatch) {
-      return {
-        owner: httpsMatch[1],
-        repo: httpsMatch[2],
-        branch: httpsMatch[3] || 'main' // GitLab typically uses main as default
-      }
-    }
-
-    // Match HTTPS URLs for custom GitLab instances
-    const customHttpsMatch = cleanUrl.match(/^https:\/\/([^\/]+)\/([^\/]+)\/([^\/]+)(?:\/-\/tree\/(.+))?$/)
-    if (customHttpsMatch && !customHttpsMatch[1].includes('github.com')) {
-      return {
-        owner: customHttpsMatch[2],
-        repo: customHttpsMatch[3],
-        branch: customHttpsMatch[4] || 'main'
-      }
-    }
-
-    // Match SSH URLs for gitlab.com
-    const sshMatch = cleanUrl.match(/^git@gitlab\.com:([^\/]+)\/(.+)$/)
-    if (sshMatch) {
-      return {
-        owner: sshMatch[1],
-        repo: sshMatch[2],
-        branch: 'main' // Default to main
-      }
-    }
-
-    // Match SSH URLs for custom GitLab instances
-    const customSshMatch = cleanUrl.match(/^git@([^:]+):([^\/]+)\/(.+)$/)
-    if (customSshMatch && !customSshMatch[1].includes('github.com')) {
-      return {
-        owner: customSshMatch[2],
-        repo: customSshMatch[3],
-        branch: 'main' // Default to main
-      }
-    }
-
-    throw new Error('Invalid GitLab repository URL: Must be a valid GitLab repository URL')
+  /**
+   * Get the default branch name for this platform
+   * Can be overridden by platform-specific classes
+   */
+  protected getDefaultBranch(): string {
+    return 'main'
   }
 
   /**
@@ -68,10 +67,10 @@ export class GitLabRepository extends BaseRepository {
     try {
       const output = await this.git.listRemote(['--symref', url])
       const match = output.match(/ref: refs\/heads\/([^\s\t]+)\s+HEAD/)
-      return match ? match[1] : 'main'
+      return match ? match[1] : this.getDefaultBranch()
     } catch (error) {
-      console.warn(`Failed to detect default branch for ${url}, defaulting to 'main':`, error)
-      return 'main'
+      console.warn(`Failed to detect default branch for ${url}, defaulting to '${this.getDefaultBranch()}':`, error)
+      return this.getDefaultBranch()
     }
   }
 
@@ -166,7 +165,7 @@ export class GitLabRepository extends BaseRepository {
     options: CloneOptions = {}
   ): Promise<CloneResult> {
     const {
-      branch = 'main',
+      branch = this.getDefaultBranch(),
       depth = 1,
       clean = false,
       retries = 0
@@ -319,24 +318,4 @@ export class GitLabRepository extends BaseRepository {
       }
     }
   }
-}
-
-// Export convenience functions
-export const parseGitLabUrl = (url: string): RepositoryInfo => {
-  const repo = new GitLabRepository()
-  return repo.parseRepositoryUrl(url)
-}
-
-export const validateGitLabRepository = async (url: string) => {
-  const repo = new GitLabRepository()
-  return repo.validateRepository(url)
-}
-
-export const cloneGitLabRepository = async (
-  url: string,
-  targetPath: string,
-  options?: CloneOptions
-): Promise<CloneResult> => {
-  const repo = new GitLabRepository()
-  return repo.cloneRepository(url, targetPath, options)
 }
