@@ -10,8 +10,8 @@
 - [ ] AST Parser for Cypress test files - Parse and analyze Cypress test syntax `M`
 - [ ] Basic command mapping engine - Convert cy.get(), cy.click(), cy.type() to Playwright equivalents `L`
 - [ ] Simple assertion conversion - Transform should() statements to expect() assertions `M`
-- [ ] File I/O system - Read Cypress files and write Playwright files `S`
-- [ ] CLI interface - Basic command-line tool for single file conversion `M`
+- [x] File I/O system - Read Cypress files and write Playwright files `S`
+- [x] CLI interface - Basic command-line tool for single file conversion `M`
 
 ### Dependencies
 
