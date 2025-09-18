@@ -3,6 +3,7 @@
 import { Command } from 'commander';
 import fs from 'fs-extra';
 import path from 'path';
+import inquirer from 'inquirer';
 import {
   CliArguments,
   ValidationResult,
@@ -249,6 +250,176 @@ export class CLI {
     return result.testFiles.length > 0;
   }
 
+  /**
+   * Scan for potential Cypress projects in subdirectories
+   */
+  async scanForCypressProjects(rootPath: string, maxDepth: number = 3): Promise<{
+    projects: Array<{
+      path: string;
+      relativePath: string;
+      configFile?: string;
+      testCount: number;
+      confidence: 'high' | 'medium' | 'low';
+    }>;
+  }> {
+    const projects: Array<{
+      path: string;
+      relativePath: string;
+      configFile?: string;
+      testCount: number;
+      confidence: 'high' | 'medium' | 'low';
+    }> = [];
+
+    async function scanDirectory(dirPath: string, currentDepth: number): Promise<void> {
+      if (currentDepth > maxDepth) return;
+
+      try {
+        const entries = await fs.readdir(dirPath, { withFileTypes: true });
+
+        // Check if current directory is a Cypress project
+        const configFiles = [
+          'cypress.config.js',
+          'cypress.config.ts',
+          'cypress.json'
+        ];
+
+        let configFile: string | undefined;
+        for (const configFileName of configFiles) {
+          const configPath = path.join(dirPath, configFileName);
+          if (await fs.pathExists(configPath)) {
+            configFile = configPath;
+            break;
+          }
+        }
+
+        // Check for test files
+        const testPatterns = [
+          '**/*.cy.js',
+          '**/*.cy.ts',
+          '**/*.spec.js',
+          '**/*.spec.ts'
+        ];
+
+        let testCount = 0;
+        const { glob } = require('glob');
+
+        for (const pattern of testPatterns) {
+          try {
+            const files = await glob(pattern, { cwd: dirPath });
+            testCount += files.length;
+          } catch {
+            // Ignore glob errors
+          }
+        }
+
+        // Check for cypress directory
+        const cypressDir = path.join(dirPath, 'cypress');
+        const hasCypressDir = await fs.pathExists(cypressDir);
+
+        // Determine confidence level
+        let confidence: 'high' | 'medium' | 'low' = 'low';
+        if (configFile && testCount > 0) {
+          confidence = 'high';
+        } else if (configFile || (hasCypressDir && testCount > 0)) {
+          confidence = 'medium';
+        } else if (testCount > 0 || hasCypressDir) {
+          confidence = 'low';
+        }
+
+        // Add project if it has any Cypress indicators
+        if (configFile || testCount > 0 || hasCypressDir) {
+          projects.push({
+            path: dirPath,
+            relativePath: path.relative(rootPath, dirPath) || '.',
+            configFile,
+            testCount,
+            confidence
+          });
+        }
+
+        // Recursively scan subdirectories
+        for (const entry of entries) {
+          if (entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'node_modules') {
+            const subDirPath = path.join(dirPath, entry.name);
+            await scanDirectory(subDirPath, currentDepth + 1);
+          }
+        }
+      } catch (error) {
+        // Ignore permission errors and continue scanning
+      }
+    }
+
+    await scanDirectory(rootPath, 0);
+
+    // Sort by confidence and test count
+    projects.sort((a, b) => {
+      const confidenceOrder = { high: 3, medium: 2, low: 1 };
+      const confidenceDiff = confidenceOrder[b.confidence] - confidenceOrder[a.confidence];
+      if (confidenceDiff !== 0) return confidenceDiff;
+      return b.testCount - a.testCount;
+    });
+
+    return { projects };
+  }
+
+  /**
+   * Interactive directory selection
+   */
+  async selectCypressProject(projects: Array<{
+    path: string;
+    relativePath: string;
+    configFile?: string;
+    testCount: number;
+    confidence: 'high' | 'medium' | 'low';
+  }>): Promise<string | null> {
+    if (projects.length === 0) {
+      console.log('❌ No Cypress projects found in the repository.');
+      return null;
+    }
+
+    if (projects.length === 1) {
+      const project = projects[0];
+      console.log(`✅ Found single Cypress project: ${project.relativePath}`);
+      console.log(`   Config: ${project.configFile ? '✅' : '❌'} | Tests: ${project.testCount} | Confidence: ${project.confidence}`);
+      return project.path;
+    }
+
+    console.log(`\n🔍 Found ${projects.length} potential Cypress projects:`);
+
+    const choices = projects.map((project, index) => {
+      const configIndicator = project.configFile ? '📄' : '❌';
+      const confidenceIndicator = {
+        high: '🟢',
+        medium: '🟡',
+        low: '🔴'
+      }[project.confidence];
+
+      return {
+        name: `${confidenceIndicator} ${project.relativePath || '.'} ${configIndicator} (${project.testCount} tests)`,
+        value: project.path,
+        short: project.relativePath || '.'
+      };
+    });
+
+    choices.push({
+      name: '❌ Cancel conversion',
+      value: null,
+      short: 'Cancel'
+    });
+
+    const answer = await inquirer.prompt([
+      {
+        type: 'list',
+        name: 'selectedProject',
+        message: 'Select a Cypress project to convert:',
+        choices,
+        pageSize: 10
+      }
+    ]);
+
+    return answer.selectedProject;
+  }
+
   private async handleConversion(options: ConversionOptions): Promise<void> {
     console.log('🚀 Starting Cypress to Playwright conversion...');
     console.log(`Source: ${options.sourceDir}`);
@@ -473,22 +644,34 @@ export class CLI {
 
       console.log('✅ Repository cloned successfully');
 
-      // Step 4: Validate as Cypress project
-      const projectValidation = await this.validateCypressProject(clonedPath);
+      // Step 4: Scan for Cypress projects in the repository
+      console.log('🔍 Scanning for Cypress projects...');
+      const scanResult = await this.scanForCypressProjects(clonedPath);
+
+      // Step 5: Select project directory (interactive if multiple found)
+      const selectedProjectPath = await this.selectCypressProject(scanResult.projects);
+      if (!selectedProjectPath) {
+        console.log('❌ Conversion cancelled or no valid project selected.');
+        process.exit(1);
+      }
+
+      // Step 6: Validate selected project
+      const projectValidation = await this.validateCypressProject(selectedProjectPath);
       if (!projectValidation.isValid) {
         console.error('❌ Invalid Cypress project:');
         projectValidation.errors?.forEach(error => console.error(`  - ${error}`));
         process.exit(1);
       }
 
-      // Step 5: Run conversion within the cloned project directory
-      console.log('🔄 Starting conversion within cloned project...');
+      // Step 7: Run conversion within the selected project directory
+      console.log('🔄 Starting conversion within selected project...');
+      console.log(`📁 Converting: ${path.relative(clonedPath, selectedProjectPath) || '.'}`);;
 
-      // Create output directory within the cloned project
-      const projectOutputDir = path.join(clonedPath, options.outputDir);
+      // Create output directory within the selected project
+      const projectOutputDir = path.join(selectedProjectPath, options.outputDir);
 
       await this.handleConversion({
-        sourceDir: clonedPath,
+        sourceDir: selectedProjectPath,
         outputDir: projectOutputDir,
         preserveStructure: options.preserveStructure,
         generatePageObjects: options.generatePageObjects,
