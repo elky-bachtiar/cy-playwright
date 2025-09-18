@@ -203,3 +203,83 @@ export interface ConfigParseResult {
   filePath?: string;
   error?: string;
 }
+
+export interface ProjectGenerationOptions {
+  outputDir: string;
+  testDir: string;
+  pageObjectDir?: string;
+  fixturesDir?: string;
+  resultsDir?: string;
+  reportDir?: string;
+  includePageObjects?: boolean;
+  includeFixtures?: boolean;
+}
+
+export interface PlaywrightProjectStructure {
+  testDir: string;
+  pageObjectDir?: string;
+  fixturesDir?: string;
+  resultsDir?: string;
+  reportDir?: string;
+}
+
+export interface ConvertedTestFile {
+  filePath: string;
+  content: string;
+  originalPath: string;
+}
+
+export interface PageObjectFile {
+  className: string;
+  filePath: string;
+  content: string;
+  methods: PageObjectMethod[];
+}
+
+export interface ConversionSummary {
+  totalFiles: number;
+  convertedTestFiles: number;
+  pageObjectFiles: number;
+  configFiles: number;
+  warningsCount: number;
+  errorsCount: number;
+  success: boolean;
+  conversionRate: number;
+  recommendations: string[];
+  nextSteps: string[];
+}
+
+export interface ProjectGenerationResult {
+  success: boolean;
+  structure?: PlaywrightProjectStructure;
+  convertedFiles?: ConvertedTestFile[];
+  pageObjectFiles?: PageObjectFile[];
+  configFile?: {
+    filePath: string;
+    content: string;
+  };
+  warnings: string[];
+  errors: string[];
+  writtenFiles?: string[];
+}
+
+export interface FileWriteOptions {
+  outputDir: string;
+  projectStructure: PlaywrightProjectStructure;
+  convertedFiles: ConvertedTestFile[];
+  pageObjectFiles: PageObjectFile[];
+  playwrightConfig: PlaywrightConfig;
+  configFormat: 'typescript' | 'javascript';
+  generatePackageJson?: boolean;
+}
+
+export interface TestFileGenerationOptions {
+  outputDir: string;
+  usePageObjects: boolean;
+  preserveImports?: boolean;
+}
+
+export interface PageObjectGenerationOptions {
+  outputDir: string;
+  pageObjectDir: string;
+}

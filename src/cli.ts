@@ -9,14 +9,25 @@ import {
   CypressProjectValidation,
   DirectoryValidation,
   TestFileScanResult,
-  ConversionOptions
+  ConversionOptions,
+  ProjectGenerationOptions,
+  CypressTestFile
 } from './types';
+import { ASTParser } from './ast-parser';
+import { ConfigMigrator } from './config-migrator';
+import { ProjectGenerator } from './project-generator';
 
 export class CLI {
   private program: Command;
+  private astParser: ASTParser;
+  private configMigrator: ConfigMigrator;
+  private projectGenerator: ProjectGenerator;
 
   constructor() {
     this.program = new Command();
+    this.astParser = new ASTParser();
+    this.configMigrator = new ConfigMigrator();
+    this.projectGenerator = new ProjectGenerator();
     this.setupCommands();
   }
 
@@ -244,8 +255,152 @@ export class CLI {
       scanResult.testFiles.forEach(file => console.log(`  - ${file}`));
     }
 
-    console.log('\n✅ Project validation complete. Ready for conversion.');
-    console.log('Note: Actual conversion logic will be implemented in subsequent tasks.');
+    console.log('\n✅ Project validation complete. Starting conversion...');
+
+    try {
+      // Parse and convert configuration
+      let playwrightConfig = {};
+      if (scanResult.configFiles.length > 0) {
+        console.log('📄 Converting configuration file...');
+        const configParseResult = await this.configMigrator.parseConfigFile(scanResult.configFiles[0]);
+        if (configParseResult.success && configParseResult.config) {
+          const configMigrationResult = this.configMigrator.migrateConfig(configParseResult.config);
+          if (configMigrationResult.success) {
+            playwrightConfig = configMigrationResult.playwrightConfig;
+            console.log('✅ Configuration converted successfully');
+            if (configMigrationResult.warnings.length > 0) {
+              console.log('⚠️  Configuration warnings:');
+              configMigrationResult.warnings.forEach(warning => console.log(`  - ${warning}`));
+            }
+          }
+        }
+      }
+
+      // Create Playwright project structure
+      console.log('📁 Creating Playwright project structure...');
+      const projectOptions: ProjectGenerationOptions = {
+        outputDir: options.outputDir,
+        testDir: 'tests',
+        includePageObjects: options.generatePageObjects,
+        includeFixtures: true
+      };
+
+      const structureResult = await this.projectGenerator.createPlaywrightProjectStructure(projectOptions);
+      if (!structureResult.success) {
+        console.error('❌ Failed to create project structure');
+        structureResult.errors.forEach(error => console.error(`  - ${error}`));
+        return;
+      }
+
+      // Parse and convert test files
+      const convertedFiles = [];
+      const pageObjectFiles = [];
+      const allCustomCommands = [];
+
+      console.log('🔄 Converting test files...');
+      for (const testFile of scanResult.testFiles) {
+        try {
+          const cypressTestFile = await this.astParser.parseTestFile(testFile);
+
+          // Convert test file
+          const testConversionResult = await this.projectGenerator.generateConvertedTestFile(
+            cypressTestFile,
+            {
+              outputDir: options.outputDir,
+              usePageObjects: options.generatePageObjects || false
+            }
+          );
+
+          if (testConversionResult.success && testConversionResult.convertedFile) {
+            convertedFiles.push(testConversionResult.convertedFile);
+            if (cypressTestFile.customCommands) {
+              allCustomCommands.push(...cypressTestFile.customCommands);
+            }
+          }
+        } catch (error) {
+          console.warn(`⚠️  Failed to parse test file ${testFile}: ${error}`);
+        }
+      }
+
+      // Parse custom command files
+      for (const commandFile of scanResult.customCommandFiles) {
+        try {
+          const customCommands = await this.astParser.parseCustomCommands(commandFile);
+          allCustomCommands.push(...customCommands);
+        } catch (error) {
+          console.warn(`⚠️  Failed to parse custom commands file ${commandFile}: ${error}`);
+        }
+      }
+
+      // Generate page objects from custom commands
+      if (options.generatePageObjects && allCustomCommands.length > 0) {
+        console.log('📝 Generating page objects from custom commands...');
+        const pageObjectResult = await this.projectGenerator.generatePageObjectFile(
+          allCustomCommands,
+          'CustomCommandsPage',
+          {
+            outputDir: options.outputDir,
+            pageObjectDir: path.join(projectOptions.testDir, 'page-objects')
+          }
+        );
+
+        if (pageObjectResult.success && pageObjectResult.pageObjectFile) {
+          pageObjectFiles.push(pageObjectResult.pageObjectFile);
+        }
+      }
+
+      // Write all files to output directory
+      console.log('💾 Writing converted files...');
+      const writeResult = await this.projectGenerator.writeProjectFiles({
+        outputDir: options.outputDir,
+        projectStructure: structureResult.structure!,
+        convertedFiles,
+        pageObjectFiles,
+        playwrightConfig,
+        configFormat: 'typescript',
+        generatePackageJson: true
+      });
+
+      if (!writeResult.success) {
+        console.error('❌ Failed to write project files');
+        writeResult.errors.forEach(error => console.error(`  - ${error}`));
+        return;
+      }
+
+      // Generate and display summary
+      const summary = this.projectGenerator.generateConversionSummary(writeResult);
+
+      console.log('\n🎉 Conversion completed successfully!');
+      console.log(`📊 Conversion Summary:`);
+      console.log(`  - Total test files: ${summary.totalFiles}`);
+      console.log(`  - Successfully converted: ${summary.convertedTestFiles}`);
+      console.log(`  - Page objects generated: ${summary.pageObjectFiles}`);
+      console.log(`  - Configuration files: ${summary.configFiles}`);
+      console.log(`  - Conversion rate: ${summary.conversionRate.toFixed(1)}%`);
+
+      if (summary.warningsCount > 0) {
+        console.log(`  - Warnings: ${summary.warningsCount}`);
+      }
+
+      if (summary.errorsCount > 0) {
+        console.log(`  - Errors: ${summary.errorsCount}`);
+      }
+
+      console.log('\n📋 Next steps:');
+      summary.nextSteps.forEach(step => console.log(`  - ${step}`));
+
+      if (writeResult.writtenFiles && writeResult.writtenFiles.length > 0) {
+        console.log(`\n📁 Generated files in ${options.outputDir}:`);
+        writeResult.writtenFiles.forEach(file => {
+          const relativePath = path.relative(options.outputDir, file);
+          console.log(`  - ${relativePath}`);
+        });
+      }
+
+    } catch (error) {
+      console.error('❌ Conversion failed:', error);
+      process.exit(1);
+    }
   }
 
   run(argv: string[] = process.argv): void {
