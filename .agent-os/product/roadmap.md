@@ -8,8 +8,8 @@
 ### Features
 
 - [x] AST Parser for Cypress test files - Parse and analyze Cypress test syntax `M`
-- [ ] Basic command mapping engine - Convert cy.get(), cy.click(), cy.type() to Playwright equivalents `L`
-- [ ] Simple assertion conversion - Transform should() statements to expect() assertions `M`
+- [x] Basic command mapping engine - Convert cy.get(), cy.click(), cy.type() to Playwright equivalents `L`
+- [x] Simple assertion conversion - Transform should() statements to expect() assertions `M`
 - [x] File I/O system - Read Cypress files and write Playwright files `S`
 - [x] CLI interface - Basic command-line tool for single file conversion `M`
 
@@ -27,10 +27,10 @@
 ### Features
 
 - [x] Configuration migration - Convert cypress.config.js to playwright.config.js `L`
-- [ ] Custom command conversion - Transform Cypress.Commands.add() to Page Object methods `XL`
-- [ ] Intercept/Route conversion - Migrate cy.intercept() to page.route() patterns `L`
-- [ ] Fixture handling - Convert Cypress fixtures to Playwright test data `M`
-- [ ] Batch processing - Convert entire test suites in single operation `M`
+- [x] Custom command conversion - Transform Cypress.Commands.add() to Page Object methods `XL`
+- [x] Intercept/Route conversion - Migrate cy.intercept() to page.route() patterns `L`
+- [x] Fixture handling - Convert Cypress fixtures to Playwright test data `M`
+- [x] Batch processing - Convert entire test suites in single operation `M`
 - [ ] Preview mode - Show proposed changes before applying `M`
 
 ### Dependencies
@@ -49,7 +49,7 @@
 - [ ] Test comparison engine - Side-by-side validation of original vs converted tests `XL`
 - [ ] Coverage analysis - Ensure test coverage is maintained post-conversion `L`
 - [ ] Performance benchmarking - Compare execution times between frameworks `M`
-- [ ] Migration report generation - Detailed conversion summary with statistics `M`
+- [x] Migration report generation - Detailed conversion summary with statistics `M`
 - [ ] Rollback functionality - Safely revert conversions if needed `L`
 
 ### Dependencies
