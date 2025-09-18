@@ -40,3 +40,6 @@ tmp/
 .env
 .env.local
 .env.production
+
+# conversion directory
+.conversion/
