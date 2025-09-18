@@ -23,11 +23,33 @@ export interface ProjectStructureResult {
   hasComponentTesting: boolean
   hasMultipleTestTypes: boolean
   hasCustomSelectors?: boolean
+  hasCustomCommands?: boolean
+  hasEnvironmentConfig?: boolean
+  hasCiCdConfig?: boolean
   testCounts?: Record<string, number>
   isEmpty?: boolean
   hasSymlinks?: boolean
+  advancedFeatures?: AdvancedFeatureResult
   errors?: string[]
   warnings?: string[]
+}
+
+export interface AdvancedFeatureResult {
+  selectorFiles: string[]
+  customCommandFiles: string[]
+  environmentFiles: string[]
+  cicdConfigurations: CiCdConfiguration[]
+  hasViewportConfig: boolean
+  hasMobileTestVariants: boolean
+  hasDockerConfig: boolean
+}
+
+export interface CiCdConfiguration {
+  platform: 'github-actions' | 'circleci' | 'appveyor' | 'other'
+  configFile: string
+  hasCypressIntegration: boolean
+  hasParallelExecution: boolean
+  hasBrowserMatrix: boolean
 }
 
 export interface DependencyResult {
@@ -64,6 +86,283 @@ export interface ProjectAnalysis {
 }
 
 export class CypressProjectDetector {
+  /**
+   * Analyze advanced project features including CI/CD, custom commands, and environment configs
+   */
+  async analyzeAdvancedFeatures(projectPath: string): Promise<AdvancedFeatureResult> {
+    const selectorFiles: string[] = []
+    const customCommandFiles: string[] = []
+    const environmentFiles: string[] = []
+    const cicdConfigurations: CiCdConfiguration[] = []
+    let hasViewportConfig = false
+    let hasMobileTestVariants = false
+    let hasDockerConfig = false
+
+    try {
+      // Detect selector files
+      const selectorPaths = [
+        'cypress/selectors',
+        'cypress/support/selectors',
+        'src/selectors'
+      ]
+
+      for (const selectorPath of selectorPaths) {
+        try {
+          const fullPath = path.join(projectPath, selectorPath)
+          if (await fs.pathExists(fullPath)) {
+            const files = await fs.readdir(fullPath)
+            const selectorFileList = files.filter(file =>
+              file.endsWith('.js') || file.endsWith('.ts') || file.endsWith('.json')
+            )
+            selectorFiles.push(...selectorFileList.map(file => path.join(selectorPath, file)))
+          }
+        } catch (error) {
+          // Ignore permission errors and continue with other paths
+        }
+      }
+
+      // Detect custom command files (.cmd.js pattern)
+      const commandPaths = [
+        'cypress/support',
+        'cypress/support/commands',
+        'cypress/commands'
+      ]
+
+      for (const commandPath of commandPaths) {
+        try {
+          const fullPath = path.join(projectPath, commandPath)
+          if (await fs.pathExists(fullPath)) {
+            const files = await fs.readdir(fullPath)
+            const commandFileList = files.filter(file =>
+              file.includes('.cmd.') || file.includes('command') || file === 'commands.js' || file === 'commands.ts'
+            )
+            customCommandFiles.push(...commandFileList.map(file => path.join(commandPath, file)))
+          }
+        } catch (error) {
+          // Ignore permission errors and continue with other paths
+        }
+      }
+
+      // Detect environment files
+      const envPaths = [
+        '.env',
+        '.env.local',
+        '.env.development',
+        '.env.production',
+        'cypress.env.json',
+        'config/environments'
+      ]
+
+      for (const envPath of envPaths) {
+        try {
+          const fullPath = path.join(projectPath, envPath)
+          if (await fs.pathExists(fullPath)) {
+            environmentFiles.push(envPath)
+          }
+        } catch (error) {
+          // Ignore permission errors and continue with other paths
+        }
+      }
+
+      // Detect CI/CD configurations
+      await this.detectCiCdConfigurations(projectPath, cicdConfigurations)
+
+      // Detect viewport and mobile configurations
+      const viewportConfig = await this.detectViewportConfiguration(projectPath)
+      hasViewportConfig = viewportConfig.hasViewportConfig
+      hasMobileTestVariants = viewportConfig.hasMobileTestVariants
+
+      // Detect Docker configuration
+      hasDockerConfig = await this.detectDockerConfiguration(projectPath)
+
+    } catch (error) {
+      // Silently handle errors in advanced feature detection
+      // These features are optional and shouldn't prevent basic project analysis
+    }
+
+    return {
+      selectorFiles,
+      customCommandFiles,
+      environmentFiles,
+      cicdConfigurations,
+      hasViewportConfig,
+      hasMobileTestVariants,
+      hasDockerConfig
+    }
+  }
+
+  /**
+   * Detect CI/CD configurations
+   */
+  private async detectCiCdConfigurations(projectPath: string, configurations: CiCdConfiguration[]): Promise<void> {
+    const cicdConfigs = [
+      {
+        platform: 'github-actions' as const,
+        patterns: ['.github/workflows/*.yml', '.github/workflows/*.yaml']
+      },
+      {
+        platform: 'circleci' as const,
+        patterns: ['.circleci/config.yml', '.circleci/config.yaml']
+      },
+      {
+        platform: 'appveyor' as const,
+        patterns: ['appveyor.yml', '.appveyor.yml']
+      }
+    ]
+
+    for (const config of cicdConfigs) {
+      for (const pattern of config.patterns) {
+        const configPath = path.join(projectPath, pattern.replace('*', ''))
+        const configDir = path.dirname(configPath)
+
+        try {
+          if (pattern.includes('*')) {
+            // Handle wildcard patterns
+            if (await fs.pathExists(configDir)) {
+              const files = await fs.readdir(configDir)
+              const matchingFiles = files.filter(file =>
+                file.endsWith('.yml') || file.endsWith('.yaml')
+              )
+
+              for (const file of matchingFiles) {
+                const fullConfigPath = path.join(configDir, file)
+                const analysis = await this.analyzeCiCdFile(fullConfigPath)
+                configurations.push({
+                  platform: config.platform,
+                  configFile: path.relative(projectPath, fullConfigPath),
+                  ...analysis
+                })
+              }
+            }
+          } else {
+            if (await fs.pathExists(configPath)) {
+              const analysis = await this.analyzeCiCdFile(configPath)
+              configurations.push({
+                platform: config.platform,
+                configFile: pattern,
+                ...analysis
+              })
+            }
+          }
+        } catch (error) {
+          // Silently ignore permission errors and other access issues
+          // CI/CD detection is optional and shouldn't fail the whole analysis
+        }
+      }
+    }
+  }
+
+  /**
+   * Analyze CI/CD configuration file content
+   */
+  private async analyzeCiCdFile(configPath: string): Promise<{
+    hasCypressIntegration: boolean
+    hasParallelExecution: boolean
+    hasBrowserMatrix: boolean
+  }> {
+    try {
+      const content = await fs.readFile(configPath, 'utf-8')
+      const lowerContent = content.toLowerCase()
+
+      return {
+        hasCypressIntegration: lowerContent.includes('cypress') || lowerContent.includes('cy:'),
+        hasParallelExecution: lowerContent.includes('parallel') || lowerContent.includes('matrix'),
+        hasBrowserMatrix: lowerContent.includes('browser') && (lowerContent.includes('matrix') || lowerContent.includes('strategy'))
+      }
+    } catch (error) {
+      return {
+        hasCypressIntegration: false,
+        hasParallelExecution: false,
+        hasBrowserMatrix: false
+      }
+    }
+  }
+
+  /**
+   * Detect viewport and mobile configuration
+   */
+  private async detectViewportConfiguration(projectPath: string): Promise<{
+    hasViewportConfig: boolean
+    hasMobileTestVariants: boolean
+  }> {
+    try {
+      // Check Cypress configuration files for viewport settings
+      const configFiles = [
+        'cypress.config.js',
+        'cypress.config.ts',
+        'cypress.json'
+      ]
+
+      for (const configFile of configFiles) {
+        const configPath = path.join(projectPath, configFile)
+        if (await fs.pathExists(configPath)) {
+          const content = await fs.readFile(configPath, 'utf-8')
+          const lowerContent = content.toLowerCase()
+
+          const hasViewportConfig = lowerContent.includes('viewport') ||
+                                  lowerContent.includes('viewportwidth') ||
+                                  lowerContent.includes('viewportheight')
+
+          const hasMobileTestVariants = lowerContent.includes('mobile') ||
+                                      lowerContent.includes('iphone') ||
+                                      lowerContent.includes('android') ||
+                                      lowerContent.includes('tablet')
+
+          if (hasViewportConfig || hasMobileTestVariants) {
+            return { hasViewportConfig, hasMobileTestVariants }
+          }
+        }
+      }
+
+      // Check test files for viewport-related commands
+      const testDirs = ['cypress/e2e', 'cypress/integration', 'cypress/component']
+      for (const testDir of testDirs) {
+        const testDirPath = path.join(projectPath, testDir)
+        if (await fs.pathExists(testDirPath)) {
+          const files = await fs.readdir(testDirPath)
+          for (const file of files) {
+            if (file.endsWith('.cy.js') || file.endsWith('.cy.ts') || file.endsWith('.spec.js') || file.endsWith('.spec.ts')) {
+              const content = await fs.readFile(path.join(testDirPath, file), 'utf-8')
+              const lowerContent = content.toLowerCase()
+
+              if (lowerContent.includes('cy.viewport') || lowerContent.includes('mobile') || lowerContent.includes('tablet')) {
+                return {
+                  hasViewportConfig: lowerContent.includes('cy.viewport'),
+                  hasMobileTestVariants: lowerContent.includes('mobile') || lowerContent.includes('tablet')
+                }
+              }
+            }
+          }
+        }
+      }
+
+      return { hasViewportConfig: false, hasMobileTestVariants: false }
+    } catch (error) {
+      return { hasViewportConfig: false, hasMobileTestVariants: false }
+    }
+  }
+
+  /**
+   * Detect Docker configuration
+   */
+  private async detectDockerConfiguration(projectPath: string): Promise<boolean> {
+    const dockerFiles = [
+      'Dockerfile',
+      'docker-compose.yml',
+      'docker-compose.yaml',
+      '.dockerignore'
+    ]
+
+    for (const dockerFile of dockerFiles) {
+      const dockerPath = path.join(projectPath, dockerFile)
+      if (await fs.pathExists(dockerPath)) {
+        return true
+      }
+    }
+
+    return false
+  }
+
   /**
    * Detect Cypress configuration files and parse them
    */
@@ -270,6 +569,12 @@ export class CypressProjectDetector {
         warnings.push('Project contains symbolic links')
       }
 
+      // Analyze advanced features
+      const advancedFeatures = await this.analyzeAdvancedFeatures(projectPath)
+      const hasCustomCommands = advancedFeatures.customCommandFiles.length > 0
+      const hasEnvironmentConfig = advancedFeatures.environmentFiles.length > 0
+      const hasCiCdConfig = advancedFeatures.cicdConfigurations.length > 0
+
       return {
         directories,
         testTypes,
@@ -277,9 +582,13 @@ export class CypressProjectDetector {
         hasComponentTesting,
         hasMultipleTestTypes: testTypes.length > 1,
         hasCustomSelectors,
+        hasCustomCommands,
+        hasEnvironmentConfig,
+        hasCiCdConfig,
         testCounts: Object.keys(testCounts).length > 0 ? testCounts : undefined,
         isEmpty,
         hasSymlinks,
+        advancedFeatures,
         errors: errors.length > 0 ? errors : undefined,
         warnings: warnings.length > 0 ? warnings : undefined
       }
@@ -292,6 +601,10 @@ export class CypressProjectDetector {
         version: 'v10+',
         hasComponentTesting: false,
         hasMultipleTestTypes: false,
+        hasCustomSelectors: false,
+        hasCustomCommands: false,
+        hasEnvironmentConfig: false,
+        hasCiCdConfig: false,
         errors
       }
     }
@@ -411,11 +724,20 @@ export class CypressProjectDetector {
 
     const hasAdvancedFeatures = structure.hasComponentTesting ||
                                structure.hasCustomSelectors ||
+                               structure.hasCustomCommands ||
+                               structure.hasEnvironmentConfig ||
+                               structure.hasCiCdConfig ||
+                               (structure.advancedFeatures?.hasViewportConfig) ||
+                               (structure.advancedFeatures?.hasMobileTestVariants) ||
+                               (structure.advancedFeatures?.hasDockerConfig) ||
                                dependencies.hasPlugins ||
                                structure.hasMultipleTestTypes
 
     let complexity: 'simple' | 'moderate' | 'complex' = 'simple'
-    if (testFileCount > 50 || dependencies.plugins.length > 5) {
+    if (testFileCount > 50 ||
+        dependencies.plugins.length > 5 ||
+        (structure.advancedFeatures?.cicdConfigurations.length || 0) > 2 ||
+        (structure.advancedFeatures?.hasDockerConfig)) {
       complexity = 'complex'
     } else if (testFileCount > 10 || hasAdvancedFeatures) {
       complexity = 'moderate'
@@ -443,6 +765,27 @@ export class CypressProjectDetector {
 
     if (structure.warnings?.length) {
       warnings.push(...structure.warnings)
+    }
+
+    // Add warnings for advanced features that require special conversion handling
+    if (structure.hasCustomCommands) {
+      warnings.push('Custom commands detected - will be converted to Page Object methods')
+    }
+
+    if (structure.advancedFeatures?.cicdConfigurations.length) {
+      warnings.push('CI/CD configurations detected - will require manual review and updates')
+    }
+
+    if (structure.advancedFeatures?.hasViewportConfig) {
+      warnings.push('Viewport configurations detected - will be migrated to Playwright viewport settings')
+    }
+
+    if (structure.advancedFeatures?.hasDockerConfig) {
+      warnings.push('Docker configurations detected - will need updates for Playwright browser dependencies')
+    }
+
+    if (structure.advancedFeatures?.environmentFiles.length) {
+      warnings.push('Environment files detected - will need validation for Playwright compatibility')
     }
 
     return {
@@ -515,6 +858,30 @@ export class CypressProjectDetector {
 
     if (analysis.structure.hasComponentTesting) {
       recommendations.push('Component tests will be converted to Playwright component testing')
+    }
+
+    if (analysis.structure.hasCustomCommands) {
+      recommendations.push('Custom commands will be converted to Page Object methods for better maintainability')
+    }
+
+    if (analysis.structure.advancedFeatures?.cicdConfigurations.length) {
+      recommendations.push('CI/CD pipelines will need updates for Playwright browser installation and execution')
+    }
+
+    if (analysis.structure.advancedFeatures?.hasViewportConfig) {
+      recommendations.push('Viewport configurations will be migrated to Playwright projects for multi-device testing')
+    }
+
+    if (analysis.structure.advancedFeatures?.hasDockerConfig) {
+      recommendations.push('Docker configurations will need updates for Playwright browser dependencies')
+    }
+
+    if (analysis.structure.advancedFeatures?.environmentFiles.length) {
+      recommendations.push('Environment configurations will be validated for Playwright compatibility')
+    }
+
+    if (analysis.structure.advancedFeatures?.hasMobileTestVariants) {
+      recommendations.push('Mobile test variants will be converted to Playwright mobile emulation')
     }
 
     // Determine estimated effort
