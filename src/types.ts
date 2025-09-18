@@ -128,3 +128,78 @@ export interface ConversionContext {
   imports: Set<string>;
   warnings: string[];
 }
+
+export interface CypressConfig {
+  baseUrl?: string;
+  viewportWidth?: number;
+  viewportHeight?: number;
+  defaultCommandTimeout?: number;
+  requestTimeout?: number;
+  responseTimeout?: number;
+  pageLoadTimeout?: number;
+  video?: boolean;
+  screenshotOnRunFailure?: boolean;
+  trashAssetsBeforeRuns?: boolean;
+  env?: Record<string, any>;
+  e2e?: {
+    baseUrl?: string;
+    supportFile?: string;
+    specPattern?: string | string[];
+    excludeSpecPattern?: string | string[];
+    setupNodeEvents?: Function;
+  };
+  component?: {
+    devServer?: any;
+    specPattern?: string | string[];
+  };
+}
+
+export interface PlaywrightConfig {
+  testDir?: string;
+  testMatch?: string | string[];
+  testIgnore?: string | string[];
+  timeout?: number;
+  fullyParallel?: boolean;
+  forbidOnly?: boolean;
+  retries?: number;
+  workers?: number;
+  reporter?: string | any[];
+  use?: {
+    baseURL?: string;
+    trace?: string;
+    screenshot?: string;
+    video?: string;
+    actionTimeout?: number;
+    navigationTimeout?: number;
+    viewport?: { width: number; height: number } | null;
+    ignoreHTTPSErrors?: boolean;
+    bypassCSP?: boolean;
+  };
+  projects?: Array<{
+    name: string;
+    use?: any;
+    testDir?: string;
+    testMatch?: string | string[];
+  }>;
+  outputDir?: string;
+  webServer?: {
+    command: string;
+    port: number;
+    reuseExistingServer?: boolean;
+  };
+}
+
+export interface ConfigMigrationResult {
+  success: boolean;
+  playwrightConfig: PlaywrightConfig;
+  warnings: string[];
+  errors: string[];
+  unmappedSettings: string[];
+}
+
+export interface ConfigParseResult {
+  success: boolean;
+  config?: CypressConfig;
+  filePath?: string;
+  error?: string;
+}
