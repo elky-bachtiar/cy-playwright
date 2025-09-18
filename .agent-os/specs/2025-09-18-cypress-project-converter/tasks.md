@@ -21,13 +21,13 @@
   - [ ] 2.8 Extend scanner to detect .cmd.js custom command files
   - [ ] 2.9 Parse dynamic viewport and device configuration patterns
 
-- [ ] 3. Create command mapping and conversion system
-  - [ ] 3.1 Write tests for Cypress to Playwright command mapping
-  - [ ] 3.2 Implement core command mapping tables (cy.get → page.locator, cy.click → locator.click)
-  - [ ] 3.3 Build assertion conversion system (should → expect)
-  - [ ] 3.4 Create async/await pattern injection for Playwright syntax
-  - [ ] 3.5 Implement custom command to page object conversion
-  - [ ] 3.6 Verify all tests pass
+- [x] 3. Create command mapping and conversion system
+  - [x] 3.1 Write tests for Cypress to Playwright command mapping
+  - [x] 3.2 Implement core command mapping tables (cy.get → page.locator, cy.click → locator.click)
+  - [x] 3.3 Build assertion conversion system (should → expect)
+  - [x] 3.4 Create async/await pattern injection for Playwright syntax
+  - [x] 3.5 Implement custom command to page object conversion
+  - [x] 3.6 Verify all tests pass
   - [ ] 3.7 Implement selector-to-locator mapping system for centralized selectors
   - [ ] 3.8 Add device-specific command mapping for mobile/desktop variants
   - [ ] 3.9 Handle .cmd.js custom command to page object conversion
