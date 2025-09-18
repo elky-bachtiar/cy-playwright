@@ -62,7 +62,7 @@ export class BuildScriptConverter {
 
       if (packageData.scripts) {
         for (const [scriptName, scriptCommand] of Object.entries(packageData.scripts)) {
-          if (this.hasCypressCommands(scriptCommand)) {
+          if (typeof scriptCommand === 'string' && this.hasCypressCommands(scriptCommand)) {
             cypressScripts.push(scriptName);
           }
         }
@@ -90,7 +90,7 @@ export class BuildScriptConverter {
       // Check in scripts
       if (packageData.scripts) {
         for (const scriptCommand of Object.values(packageData.scripts)) {
-          if (scriptCommand.includes('start-server-and-test')) {
+          if (typeof scriptCommand === 'string' && scriptCommand.includes('start-server-and-test')) {
             return true;
           }
         }
@@ -129,10 +129,12 @@ export class BuildScriptConverter {
       convertedPackage.scripts = {};
 
       for (const [scriptName, scriptCommand] of Object.entries(packageData.scripts)) {
-        const convertedScriptName = this.convertScriptName(scriptName);
-        const convertedScriptCommand = this.convertScriptCommand(scriptCommand);
+        if (typeof scriptCommand === 'string') {
+          const convertedScriptName = this.convertScriptName(scriptName);
+          const convertedScriptCommand = this.convertScriptCommand(scriptCommand);
 
-        convertedPackage.scripts[convertedScriptName] = convertedScriptCommand;
+          convertedPackage.scripts[convertedScriptName] = convertedScriptCommand;
+        }
       }
 
       // Add additional Playwright scripts if requested

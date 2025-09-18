@@ -16,18 +16,21 @@ import {
 import { ASTParser } from './ast-parser';
 import { ConfigMigrator } from './config-migrator';
 import { ProjectGenerator } from './project-generator';
+import { GitHubRepository } from './github-repository';
 
 export class CLI {
   private program: Command;
   private astParser: ASTParser;
   private configMigrator: ConfigMigrator;
   private projectGenerator: ProjectGenerator;
+  private githubRepo: GitHubRepository;
 
   constructor() {
     this.program = new Command();
     this.astParser = new ASTParser();
     this.configMigrator = new ConfigMigrator();
     this.projectGenerator = new ProjectGenerator();
+    this.githubRepo = new GitHubRepository();
     this.setupCommands();
   }
 
@@ -53,6 +56,24 @@ export class CLI {
           generatePageObjects: options.generatePageObjects,
           verbose: options.verbose
         });
+      });
+
+    this.program
+      .option('--github-url <url>', 'GitHub repository URL to clone and convert')
+      .option('-o, --output <path>', 'Output directory for converted Playwright project', './playwright-project')
+      .option('--preserve-structure', 'Preserve original directory structure', false)
+      .option('--generate-page-objects', 'Generate page object models from custom commands', true)
+      .option('-v, --verbose', 'Enable verbose logging', false)
+      .action(async (options) => {
+        if (options.githubUrl) {
+          await this.handleGitHubConversion({
+            githubUrl: options.githubUrl,
+            outputDir: options.output,
+            preserveStructure: options.preserveStructure,
+            generatePageObjects: options.generatePageObjects,
+            verbose: options.verbose
+          });
+        }
       });
   }
 
@@ -399,6 +420,98 @@ export class CLI {
 
     } catch (error) {
       console.error('❌ Conversion failed:', error);
+      process.exit(1);
+    }
+  }
+
+  private async handleGitHubConversion(options: {
+    githubUrl: string;
+    outputDir: string;
+    preserveStructure: boolean;
+    generatePageObjects: boolean;
+    verbose: boolean;
+  }): Promise<void> {
+    console.log('🚀 Starting GitHub repository conversion...');
+    console.log(`Repository: ${options.githubUrl}`);
+    console.log(`Output: ${options.outputDir}`);
+
+    let clonedPath: string | undefined;
+
+    try {
+      // Step 1: Parse and validate GitHub URL
+      const repoInfo = this.githubRepo.parseRepositoryUrl(options.githubUrl);
+      console.log(`📋 Repository: ${repoInfo.owner}/${repoInfo.repo} (${repoInfo.branch})`);
+
+      // Step 2: Validate repository accessibility
+      const validation = await this.githubRepo.validateAccess(options.githubUrl);
+      if (!validation.accessible) {
+        console.error('❌ Repository validation failed:');
+        console.error(`  - ${validation.error}`);
+        process.exit(1);
+      }
+
+      // Step 3: Clone repository to .conversion directory
+      const conversionDir = path.join(process.cwd(), '.conversion');
+      await fs.ensureDir(conversionDir);
+
+      clonedPath = path.join(conversionDir, `${repoInfo.owner}-${repoInfo.repo}`);
+
+      console.log(`📥 Cloning repository to: ${clonedPath}`);
+
+      const cloneResult = await this.githubRepo.cloneRepository(options.githubUrl, clonedPath, {
+        branch: repoInfo.branch,
+        clean: true,
+        depth: 1,
+        retries: 2
+      });
+
+      if (!cloneResult.success) {
+        console.error('❌ Failed to clone repository:');
+        console.error(`  - ${cloneResult.error}`);
+        process.exit(1);
+      }
+
+      console.log('✅ Repository cloned successfully');
+
+      // Step 4: Validate as Cypress project
+      const projectValidation = await this.validateCypressProject(clonedPath);
+      if (!projectValidation.isValid) {
+        console.error('❌ Invalid Cypress project:');
+        projectValidation.errors?.forEach(error => console.error(`  - ${error}`));
+        process.exit(1);
+      }
+
+      // Step 5: Run conversion within the cloned project directory
+      console.log('🔄 Starting conversion within cloned project...');
+
+      // Create output directory within the cloned project
+      const projectOutputDir = path.join(clonedPath, options.outputDir);
+
+      await this.handleConversion({
+        sourceDir: clonedPath,
+        outputDir: projectOutputDir,
+        preserveStructure: options.preserveStructure,
+        generatePageObjects: options.generatePageObjects,
+        verbose: options.verbose
+      });
+
+      console.log(`\n🎉 GitHub repository conversion completed!`);
+      console.log(`📁 Cloned repository: ${clonedPath}`);
+      console.log(`📁 Converted project: ${projectOutputDir}`);
+
+    } catch (error) {
+      console.error('❌ GitHub conversion failed:', error);
+
+      // Cleanup on error
+      if (clonedPath && await fs.pathExists(clonedPath)) {
+        try {
+          console.log('🧹 Cleaning up failed conversion...');
+          await fs.remove(clonedPath);
+        } catch (cleanupError) {
+          console.warn(`⚠️ Failed to cleanup ${clonedPath}:`, cleanupError);
+        }
+      }
+
       process.exit(1);
     }
   }

@@ -43,3 +43,4 @@ tmp/
 
 # conversion directory
 .conversion/
+converted-projects/

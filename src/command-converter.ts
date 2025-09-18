@@ -736,19 +736,126 @@ export class CommandConverter {
       case 'eq':
         const index = chainedCall.args[0] as number;
         return { code: `${baseLocator}.nth(${index})`, requiresAwait: false };
+
+      // ✅ Added DOM traversal methods
+      case 'parent':
+        if (chainedCall.args.length > 0 && chainedCall.args[0]) {
+          const parentSelector = chainedCall.args[0] as string;
+          return { code: `${baseLocator}.locator('..').locator(${this.formatValue(parentSelector)})`, requiresAwait: false };
+        }
+        return { code: `${baseLocator}.locator('..')`, requiresAwait: false };
+
+      case 'parents':
+        if (chainedCall.args.length > 0 && chainedCall.args[0]) {
+          const ancestorSelector = chainedCall.args[0] as string;
+          context.warnings.push(`cy.parents('${ancestorSelector}') converted to closest() - verify ancestor relationship`);
+          return { code: `${baseLocator}.locator('xpath=ancestor::*').filter({ has: page.locator(${this.formatValue(ancestorSelector)}) })`, requiresAwait: false };
+        }
+        return { code: `${baseLocator}.locator('xpath=ancestor::*')`, requiresAwait: false };
+
+      case 'closest':
+        if (chainedCall.args.length > 0) {
+          const closestSelector = chainedCall.args[0] as string;
+          return { code: `${baseLocator}.locator('xpath=ancestor-or-self::*').filter({ has: page.locator(${this.formatValue(closestSelector)}) }).first()`, requiresAwait: false };
+        }
+        return { code: `${baseLocator}.locator('xpath=ancestor-or-self::*')`, requiresAwait: false };
+
+      case 'children':
+        if (chainedCall.args.length > 0 && chainedCall.args[0]) {
+          const childSelector = chainedCall.args[0] as string;
+          return { code: `${baseLocator}.locator('> *').locator(${this.formatValue(childSelector)})`, requiresAwait: false };
+        }
+        return { code: `${baseLocator}.locator('> *')`, requiresAwait: false };
+
+      case 'siblings':
+        if (chainedCall.args.length > 0 && chainedCall.args[0]) {
+          const siblingSelector = chainedCall.args[0] as string;
+          context.warnings.push(`cy.siblings() converted - verify sibling relationship works as expected`);
+          return { code: `${baseLocator}.locator('xpath=following-sibling::* | preceding-sibling::*').locator(${this.formatValue(siblingSelector)})`, requiresAwait: false };
+        }
+        return { code: `${baseLocator}.locator('xpath=following-sibling::* | preceding-sibling::*')`, requiresAwait: false };
+
+      case 'next':
+        if (chainedCall.args.length > 0 && chainedCall.args[0]) {
+          const nextSelector = chainedCall.args[0] as string;
+          return { code: `${baseLocator}.locator('xpath=following-sibling::*').locator(${this.formatValue(nextSelector)}).first()`, requiresAwait: false };
+        }
+        return { code: `${baseLocator}.locator('xpath=following-sibling::*').first()`, requiresAwait: false };
+
+      case 'prev':
+        if (chainedCall.args.length > 0 && chainedCall.args[0]) {
+          const prevSelector = chainedCall.args[0] as string;
+          return { code: `${baseLocator}.locator('xpath=preceding-sibling::*').locator(${this.formatValue(prevSelector)}).first()`, requiresAwait: false };
+        }
+        return { code: `${baseLocator}.locator('xpath=preceding-sibling::*').first()`, requiresAwait: false };
+
+      // ✅ Enhanced interaction methods
+      case 'dblclick':
+        return { code: `${baseLocator}.dblclick()`, requiresAwait: true };
+
+      case 'rightclick':
+        return { code: `${baseLocator}.click({ button: 'right' })`, requiresAwait: true };
+
+      case 'trigger':
+        const eventType = chainedCall.args[0] as string;
+        context.warnings.push(`cy.trigger('${eventType}') converted - verify event behavior matches expected`);
+        if (eventType === 'mouseover' || eventType === 'mouseenter') {
+          return { code: `${baseLocator}.hover()`, requiresAwait: true };
+        } else if (eventType === 'mousedown') {
+          return { code: `${baseLocator}.dispatchEvent('mousedown')`, requiresAwait: true };
+        } else if (eventType === 'mouseup') {
+          return { code: `${baseLocator}.dispatchEvent('mouseup')`, requiresAwait: true };
+        }
+        return { code: `${baseLocator}.dispatchEvent('${eventType}')`, requiresAwait: true };
+
+      case 'scrollIntoView':
+        return { code: `${baseLocator}.scrollIntoViewIfNeeded()`, requiresAwait: true };
+
+      case 'submit':
+        return { code: `${baseLocator}.press('Enter')`, requiresAwait: true };
+
+      // ✅ Enhanced filtering and traversal
+      case 'filter':
+        if (chainedCall.args.length > 0) {
+          const filterArg = chainedCall.args[0] as string;
+          if (filterArg.includes(':contains(')) {
+            const textMatch = filterArg.match(/:contains\(["']?([^"')]+)["']?\)/);
+            if (textMatch) {
+              return { code: `${baseLocator}.filter({ hasText: ${this.formatValue(textMatch[1])} })`, requiresAwait: false };
+            }
+          }
+          return { code: `${baseLocator}.filter({ has: page.locator(${this.formatValue(filterArg)}) })`, requiresAwait: false };
+        }
+        return { code: baseLocator, requiresAwait: false };
+
+      case 'not':
+        if (chainedCall.args.length > 0) {
+          const notSelector = chainedCall.args[0] as string;
+          return { code: `${baseLocator}.locator(':not(${notSelector})')`, requiresAwait: false };
+        }
+        return { code: baseLocator, requiresAwait: false };
+
+      // ✅ Existing methods with improvements
       case 'as':
         // Cypress aliases are not needed in Playwright in the same way
         context.warnings.push(`Cypress alias '${chainedCall.args[0]}' converted - consider storing in variable instead`);
         return { code: '', requiresAwait: false };
+
       case 'tab':
         return { code: `${baseLocator}.press('Tab')`, requiresAwait: true };
+
       case 'wait':
         if (chainedCall.args.length > 0 && typeof chainedCall.args[0] === 'number') {
           return { code: `page.waitForTimeout(${chainedCall.args[0]})`, requiresAwait: true };
+        } else if (chainedCall.args.length > 0 && typeof chainedCall.args[0] === 'string' && chainedCall.args[0].startsWith('@')) {
+          const alias = chainedCall.args[0].substring(1);
+          context.warnings.push(`cy.wait('@${alias}') converted to generic API wait - may need manual adjustment`);
+          return { code: `page.waitForResponse('**/*')`, requiresAwait: true };
         }
         return { code: `${baseLocator}./* TODO: wait */`, requiresAwait: false };
+
       default:
-        context.warnings.push(`Unknown chained method: ${chainedCall.method}`);
+        context.warnings.push(`Unknown chained method: ${chainedCall.method} - consider manual conversion`);
         return { code: `${baseLocator}./* TODO: ${chainedCall.method} */`, requiresAwait: false };
     }
   }
@@ -785,10 +892,10 @@ export class CommandConverter {
   }
 
   /**
-   * Optimize CSS selectors to use Playwright's semantic selectors
+   * Optimize CSS selectors to use Playwright's semantic selectors with enhanced complex pattern support
    */
   private optimizeSelector(selector: string): string {
-    // Handle data-testid
+    // ✅ Handle data-testid with complex expressions
     const testIdMatch = selector.match(/\[data-testid=["']([^"']+)["']\]/) ||
                        selector.match(/\[data-testid=([^[\]]+)\]/);
     if (testIdMatch) {
@@ -796,15 +903,15 @@ export class CommandConverter {
       return `page.getByTestId('${value}')`;
     }
 
-    // Handle data-cy (Cypress convention)
+    // ✅ Handle data-cy (Cypress convention) with template literal support
     const cyMatch = selector.match(/\[data-cy=["']([^"']+)["']\]/) ||
                    selector.match(/\[data-cy=([^[\]]+)\]/);
     if (cyMatch) {
       const value = cyMatch[1].replace(/['"]/g, '');
-      return `page.getByTestId('${value}')`;
+      return `page.getByTestId(${this.formatValue(value)})`;
     }
 
-    // Handle role
+    // ✅ Handle role with options
     const roleMatch = selector.match(/\[role=["']([^"']+)["']\]/) ||
                      selector.match(/\[role=([^[\]]+)\]/);
     if (roleMatch) {
@@ -812,21 +919,128 @@ export class CommandConverter {
       return `page.getByRole('${value}')`;
     }
 
-    // Handle aria-label
+    // ✅ Handle aria-label with complex patterns
     const labelMatch = selector.match(/\[aria-label=["']([^"']+)["']\]/) ||
                       selector.match(/\[aria-label=([^[\]]+)\]/);
     if (labelMatch) {
       const value = labelMatch[1].replace(/['"]/g, '');
-      return `page.getByLabel('${value}')`;
+      return `page.getByLabel(${this.formatValue(value)})`;
     }
 
-    // Handle placeholder
+    // ✅ Handle placeholder with variables
     const placeholderMatch = selector.match(/\[placeholder=["']([^"']+)["']\]/);
     if (placeholderMatch) {
-      return `page.getByPlaceholder('${placeholderMatch[1]}')`;
+      return `page.getByPlaceholder(${this.formatValue(placeholderMatch[1])})`;
     }
 
-    // Fall back to generic locator
+    // ✅ Handle title attribute
+    const titleMatch = selector.match(/\[title=["']([^"']+)["']\]/);
+    if (titleMatch) {
+      return `page.getByTitle(${this.formatValue(titleMatch[1])})`;
+    }
+
+    // ✅ Handle alt attribute for images
+    const altMatch = selector.match(/\[alt=["']([^"']+)["']\]/);
+    if (altMatch) {
+      return `page.getByAltText(${this.formatValue(altMatch[1])})`;
+    }
+
+    // ✅ Handle text content patterns
+    const textMatch = selector.match(/:contains\(["']([^"']+)["']\)/);
+    if (textMatch) {
+      return `page.getByText(${this.formatValue(textMatch[1])})`;
+    }
+
+    // ✅ Handle complex descendant combinator patterns
+    if (selector.includes(' > ')) {
+      const parts = selector.split(' > ').map(part => part.trim());
+      if (parts.length === 2) {
+        const parent = this.optimizeSelector(parts[0]);
+        const child = this.optimizeSelector(parts[1]);
+        return `${parent}.locator('> ${parts[1]}')`;
+      }
+    }
+
+    // ✅ Handle adjacent sibling combinator (+)
+    if (selector.includes(' + ')) {
+      const parts = selector.split(' + ').map(part => part.trim());
+      if (parts.length === 2) {
+        const base = this.optimizeSelector(parts[0]);
+        return `${base}.locator('+ ${parts[1]}')`;
+      }
+    }
+
+    // ✅ Handle general sibling combinator (~)
+    if (selector.includes(' ~ ')) {
+      const parts = selector.split(' ~ ').map(part => part.trim());
+      if (parts.length === 2) {
+        const base = this.optimizeSelector(parts[0]);
+        return `${base}.locator('~ ${parts[1]}')`;
+      }
+    }
+
+    // ✅ Handle pseudo-selectors common in Cypress
+    if (selector.includes(':first')) {
+      const baseSelector = selector.replace(':first', '');
+      return `${this.optimizeSelector(baseSelector)}.first()`;
+    }
+
+    if (selector.includes(':last')) {
+      const baseSelector = selector.replace(':last', '');
+      return `${this.optimizeSelector(baseSelector)}.last()`;
+    }
+
+    if (selector.includes(':eq(')) {
+      const eqMatch = selector.match(/(.+):eq\((\d+)\)/);
+      if (eqMatch) {
+        const baseSelector = eqMatch[1];
+        const index = parseInt(eqMatch[2]);
+        return `${this.optimizeSelector(baseSelector)}.nth(${index})`;
+      }
+    }
+
+    // ✅ Handle nth-child patterns
+    const nthChildMatch = selector.match(/(.+):nth-child\((\d+)\)/);
+    if (nthChildMatch) {
+      const baseSelector = nthChildMatch[1];
+      const index = parseInt(nthChildMatch[2]) - 1; // Convert to 0-based index
+      return `${this.optimizeSelector(baseSelector)}.nth(${index})`;
+    }
+
+    // ✅ Handle visibility pseudo-selectors
+    if (selector.includes(':visible')) {
+      const baseSelector = selector.replace(':visible', '');
+      return `${this.optimizeSelector(baseSelector)}.locator(':visible')`;
+    }
+
+    if (selector.includes(':hidden')) {
+      const baseSelector = selector.replace(':hidden', '');
+      return `${this.optimizeSelector(baseSelector)}.locator(':hidden')`;
+    }
+
+    // ✅ Handle attribute selectors with operators
+    const attrOperatorMatch = selector.match(/\[([^=\]]+)([\*\^$|~]?)=["']([^"']+)["']\]/);
+    if (attrOperatorMatch) {
+      const [, attr, operator, value] = attrOperatorMatch;
+      const formattedValue = this.formatValue(value);
+
+      switch (operator) {
+        case '*': // contains
+          return `page.locator(\`[${attr}*=\${${formattedValue}}]\`)`;
+        case '^': // starts with
+          return `page.locator(\`[${attr}^=\${${formattedValue}}]\`)`;
+        case '$': // ends with
+          return `page.locator(\`[${attr}$=\${${formattedValue}}]\`)`;
+        case '|': // language attribute
+          return `page.locator(\`[${attr}|=\${${formattedValue}}]\`)`;
+        case '~': // word in list
+          return `page.locator(\`[${attr}~=\${${formattedValue}}]\`)`;
+        default:
+          return `page.locator(\`[${attr}=\${${formattedValue}}]\`)`;
+      }
+    }
+
+    // Fall back to generic locator with enhanced formatting
     return `page.locator(${this.formatValue(selector)})`;
   }
 
@@ -1160,13 +1374,78 @@ export class CommandConverter {
   }
 
   /**
-   * Format a single value for code generation
+   * Format a single value for code generation with enhanced template literal support
    */
-  private formatValue(value: string | number | boolean): string {
+  private formatValue(value: any): string {
     if (typeof value === 'string') {
+      // ✅ Enhanced template literal and variable interpolation handling
+
+      // Check if it's a template literal (contains ${})
+      if (value.includes('${')) {
+        // Convert to template literal format
+        return `\`${value.replace(/`/g, '\\`')}\``;
+      }
+
+      // Check if it contains variable references (common patterns)
+      if (this.isVariableReference(value)) {
+        return value; // Return as-is for variables
+      }
+
+      // Check for dynamic selector patterns like [data-testid="${variable}"]
+      if (this.containsDynamicPattern(value)) {
+        return `\`${value}\``;
+      }
+
+      // Regular string literal
       return `'${value.replace(/'/g, "\\'")}'`;
     }
+
+    if (typeof value === 'boolean' || typeof value === 'number') {
+      return String(value);
+    }
+
+    // Handle other types (arrays, objects, etc.)
+    if (Array.isArray(value)) {
+      return `[${value.map(v => this.formatValue(v)).join(', ')}]`;
+    }
+
+    if (typeof value === 'object' && value !== null) {
+      const entries = Object.entries(value).map(([k, v]) => `${k}: ${this.formatValue(v)}`);
+      return `{ ${entries.join(', ')} }`;
+    }
+
     return String(value);
+  }
+
+  /**
+   * Check if a string is likely a variable reference
+   */
+  private isVariableReference(value: string): boolean {
+    // Common variable patterns
+    const variablePatterns = [
+      /^[a-zA-Z_$][a-zA-Z0-9_$]*$/, // Simple variable name
+      /^[a-zA-Z_$][a-zA-Z0-9_$]*\.[a-zA-Z_$][a-zA-Z0-9_$]*/, // Object property access
+      /^[a-zA-Z_$][a-zA-Z0-9_$]*\[[^\]]+\]/, // Array or object bracket notation
+      /^this\.[a-zA-Z_$][a-zA-Z0-9_$]*/, // this references
+      /^\w+\(\)$/, // Function calls without arguments
+      /^\w+\([^)]*\)$/ // Function calls with arguments
+    ];
+
+    return variablePatterns.some(pattern => pattern.test(value));
+  }
+
+  /**
+   * Check if a string contains dynamic patterns that should be template literals
+   */
+  private containsDynamicPattern(value: string): boolean {
+    const dynamicPatterns = [
+      /\$\{[^}]+\}/, // Template literal expressions
+      /\[[^\]]*\$[^\]]*\]/, // Dynamic attribute selectors
+      /["'][^"']*\$[^"']*["']/, // String with variable interpolation
+      /#\{[^}]+\}/ // Alternative interpolation syntax
+    ];
+
+    return dynamicPatterns.some(pattern => pattern.test(value));
   }
 
   /**

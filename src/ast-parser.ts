@@ -6,6 +6,7 @@ import {
   CypressTestFile,
   CypressDescribe,
   CypressTest,
+  CypressHook,
   CustomCommand,
   ChainedCall,
   ImportStatement,
@@ -231,6 +232,15 @@ export class ASTParser {
   }
 
   /**
+   * Check if a node is a hook call (beforeEach, before, afterEach, after)
+   */
+  private isHookCall(node: ts.Node): node is ts.CallExpression {
+    return ts.isCallExpression(node) &&
+           ts.isIdentifier(node.expression) &&
+           ['beforeEach', 'before', 'afterEach', 'after'].includes(node.expression.text);
+  }
+
+  /**
    * Check if a node is a Cypress command
    */
   private isCypressCommand(node: ts.Node): node is ts.CallExpression {
@@ -283,6 +293,7 @@ export class ASTParser {
       name: nameArg.text,
       tests: [],
       describes: [],
+      hooks: [],
       lineNumber: this.getLineNumber(node)
     };
 
@@ -304,6 +315,11 @@ export class ASTParser {
               if (test) {
                 describe.tests.push(test);
               }
+            } else if (this.isHookCall(callExpr)) {
+              const hook = this.parseHook(callExpr);
+              if (hook) {
+                describe.hooks!.push(hook);
+              }
             }
           }
         }
@@ -311,6 +327,37 @@ export class ASTParser {
     }
 
     return describe;
+  }
+
+  /**
+   * Parse a hook (beforeEach, before, afterEach, after) block
+   */
+  private parseHook(node: ts.CallExpression): CypressHook | null {
+    if (node.arguments.length < 1) return null;
+
+    const hookType = (node.expression as ts.Identifier).text as CypressHook['type'];
+
+    const hook: CypressHook = {
+      type: hookType,
+      commands: [],
+      lineNumber: this.getLineNumber(node)
+    };
+
+    const bodyArg = node.arguments[0];
+    if (ts.isArrowFunction(bodyArg) || ts.isFunctionExpression(bodyArg)) {
+      if (bodyArg.body && ts.isBlock(bodyArg.body)) {
+        for (const statement of bodyArg.body.statements) {
+          if (ts.isExpressionStatement(statement) && this.isCypressCommand(statement.expression)) {
+            const command = this.parseCypressCommand(statement.expression);
+            if (command) {
+              hook.commands.push(command);
+            }
+          }
+        }
+      }
+    }
+
+    return hook;
   }
 
   /**

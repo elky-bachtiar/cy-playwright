@@ -84,6 +84,12 @@ export interface ChainedCall {
   args: any[];
 }
 
+export interface CypressHook {
+  type: 'beforeEach' | 'before' | 'afterEach' | 'after';
+  commands: CypressCommand[];
+  lineNumber?: number;
+}
+
 export interface CypressTest {
   name: string;
   commands: CypressCommand[];
@@ -94,6 +100,7 @@ export interface CypressDescribe {
   name: string;
   tests: CypressTest[];
   describes?: CypressDescribe[];
+  hooks?: CypressHook[];
   lineNumber?: number;
 }
 
