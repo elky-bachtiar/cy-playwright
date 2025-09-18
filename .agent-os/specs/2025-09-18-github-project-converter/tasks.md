@@ -1,183 +1,374 @@
-# GitHub Project Converter Tasks
+# Spec Tasks
 
-These are the implementation tasks for the GitHub Cypress to Playwright converter, enhanced to support both helenanull/cypress-example and cypress-io/cypress-example-kitchensink repositories.
+These are the tasks to be completed for the spec detailed in @.agent-os/specs/2025-09-18-github-project-converter/spec.md
 
-## Phase 1: Core Infrastructure (Week 1)
+> Created: 2025-09-18
+> Status: Ready for Implementation
 
-### Repository Management
-- [ ] Implement GitHub URL validation and parsing (supports both target repositories)
-- [ ] Create repository cloning service using `simple-git`
-- [ ] Add support for branch specification (default to main/master)
-- [ ] Implement repository accessibility checking
-- [ ] Add error handling for network and authentication issues
+## Tasks
 
-### Project Detection
-- [ ] Build Cypress project detection logic (cypress.config.js, cypress.json)
-- [ ] Implement package manager detection (npm, yarn, pnpm)
-- [ ] Create project structure analysis (test directories, support files)
-- [ ] Add dependency scanning and validation
-- [ ] Detect centralized selector directories (cypress/selectors/)
-- [ ] Scan for .cmd.js custom command files
-- [ ] Analyze environment configuration files and .env usage
-- [ ] **NEW**: Detect CI/CD configuration files (GitHub Actions, CircleCI, AppVeyor)
-- [ ] **NEW**: Identify Docker configurations (Dockerfile, docker-compose.yml)
-- [ ] **NEW**: Analyze package.json scripts and custom build scripts
+### Task 1: Repository Management and Project Detection
 
-## Phase 2: Conversion Pipeline (Week 2)
+**Objective**: Build robust GitHub repository handling and intelligent Cypress project detection capabilities.
 
-### Core Conversion
-- [ ] Integrate existing AST conversion engine
-- [ ] Extend conversion engine for GitHub project contexts
-- [ ] Implement configuration file migration (cypress.config.js → playwright.config.js)
-- [ ] Add package.json script and dependency updates
-- [ ] Handle fixtures and support file conversion
-- [ ] Process centralized selector files and convert to locator patterns
-- [ ] Handle .cmd.js custom command files in conversion pipeline
-- [ ] Support dynamic viewport and device configuration conversion
-- [ ] Generate mobile/desktop test variants where detected
+1. **Write test suite for GitHub repository validation**
+   - Test URL parsing for both target repositories (helenanull/cypress-example, cypress-io/cypress-example-kitchensink)
+   - Test branch specification and default branch detection
+   - Test authentication and accessibility validation
+   - Test network error scenarios and recovery
 
-### Enhanced Kitchen Sink Support
-- [ ] **NEW**: Implement comprehensive Cypress API coverage mapping
-- [ ] **NEW**: Handle advanced test patterns (component tests, API tests, visual tests)
-- [ ] **NEW**: Convert complex assertion patterns and custom matchers
-- [ ] **NEW**: Process educational comments and preserve documentation
-- [ ] **NEW**: Handle plugin-specific patterns and suggest alternatives
+2. **Implement GitHub repository service**
+   - Create GitHubRepository class with URL validation and parsing
+   - Implement repository cloning using simple-git library
+   - Add branch detection and checkout functionality
+   - Implement accessibility checking and error handling
 
-### Dependency Management
-- [ ] Create isolated environment for dependency installation
-- [ ] Implement automatic Playwright dependency installation
-- [ ] Add support for different Node.js versions
-- [ ] Handle dependency conflicts and resolution
-- [ ] **NEW**: Analyze and convert Cypress plugin dependencies
-- [ ] **NEW**: Suggest Playwright equivalent plugins and tools
+3. **Write test suite for Cypress project detection**
+   - Test detection of cypress.config.js vs cypress.json projects
+   - Test package manager detection (npm, yarn, pnpm)
+   - Test project structure analysis (e2e, integration, component test directories)
+   - Test dependency scanning and version compatibility
 
-## Phase 3: CI/CD and Infrastructure Migration (Week 3)
+4. **Implement Cypress project analyzer**
+   - Create CypressProjectDetector class
+   - Implement configuration file parsing (cypress.config.js/cypress.json)
+   - Add dependency analysis and version checking
+   - Create project structure mapper
 
-### CI/CD Configuration Conversion
-- [ ] **NEW**: Convert GitHub Actions workflows from Cypress to Playwright
-- [ ] **NEW**: Transform CircleCI configurations for Playwright
-- [ ] **NEW**: Handle AppVeyor YAML configurations
-- [ ] **NEW**: Convert parallel test execution patterns
-- [ ] **NEW**: Migrate artifact collection and reporting configurations
+5. **Write test suite for advanced project features**
+   - Test centralized selector directory detection (cypress/selectors/)
+   - Test custom command file detection (.cmd.js files)
+   - Test environment configuration scanning
+   - Test CI/CD pipeline detection (GitHub Actions, CircleCI, AppVeyor)
 
-### Docker and Scripts
-- [ ] **NEW**: Convert Dockerfile configurations for Playwright
-- [ ] **NEW**: Transform docker-compose.yml for Playwright services
-- [ ] **NEW**: Migrate package.json scripts (test, build, lint, etc.)
-- [ ] **NEW**: Convert custom build and deployment scripts
-- [ ] **NEW**: Handle start-server-and-test patterns
+6. **Implement advanced feature detection**
+   - Add selector directory analyzer
+   - Implement custom command file scanner
+   - Create environment configuration detector
+   - Add CI/CD pipeline configuration analyzer
 
-### Advanced Configuration
-- [ ] **NEW**: Convert multi-browser configuration matrices
-- [ ] **NEW**: Handle headless vs. headed test configurations
-- [ ] **NEW**: Migrate test parallelization settings
-- [ ] **NEW**: Convert environment-specific test configurations
+7. **Integrate and validate repository management system**
+   - Test end-to-end repository cloning and analysis workflow
+   - Validate detection accuracy with both target repositories
+   - Performance test with large repositories
+   - Create comprehensive project detection report generator
 
-## Phase 4: API and Service Layer (Week 4)
+### Task 2: Enhanced Conversion Pipeline
 
-### REST API Development
-- [ ] Create conversion initiation endpoint (POST /api/convert/github)
-- [ ] Implement status tracking endpoint (GET /api/convert/{id}/status)
-- [ ] Add download endpoint for converted projects (GET /api/convert/{id}/download)
-- [ ] Create conversion report endpoint (GET /api/convert/{id}/report)
-- [ ] Implement cleanup endpoint (DELETE /api/convert/{id})
-- [ ] Add device configuration endpoints for mobile/desktop variants
-- [ ] Create selector analysis endpoint for project structure insights
-- [ ] **NEW**: Add CI/CD configuration analysis endpoint
-- [ ] **NEW**: Create plugin compatibility check endpoint
+**Objective**: Extend existing AST conversion engine for comprehensive GitHub project conversion.
 
-### Background Processing
-- [ ] Set up job queue system for long-running conversions
-- [ ] Implement progress tracking and real-time updates
-- [ ] Add timeout handling and job cancellation
-- [ ] Create worker process for conversion pipeline
-- [ ] **NEW**: Handle large repository processing efficiently
-- [ ] **NEW**: Implement conversion result caching
+1. **Write test suite for AST conversion integration**
+   - Test integration with existing conversion engine
+   - Test configuration file migration (cypress.config.js → playwright.config.js)
+   - Test package.json script and dependency updates
+   - Test fixture and support file conversion patterns
 
-## Phase 5: Validation and Packaging (Week 5)
+2. **Extend AST conversion engine for GitHub contexts**
+   - Integrate existing AST parsing engine
+   - Add GitHub project-specific conversion rules
+   - Implement configuration file migration logic
+   - Create package.json transformation engine
 
-### Conversion Validation
-- [ ] Implement basic syntax validation for converted tests
-- [ ] Add optional test execution for validation
-- [ ] Create conversion report generation
-- [ ] Implement error categorization and suggestions
-- [ ] Validate converted selector patterns and locator strategies
-- [ ] Test mobile/desktop variant generation accuracy
-- [ ] Validate environment configuration conversion
-- [ ] **NEW**: Verify CI/CD configuration conversion accuracy
-- [ ] **NEW**: Test Docker configuration functionality
-- [ ] **NEW**: Validate script migration completeness
+3. **Write test suite for advanced conversion patterns**
+   - Test centralized selector file conversion to locator patterns
+   - Test custom command (.cmd.js) conversion to Page Objects
+   - Test dynamic viewport and device configuration handling
+   - Test mobile/desktop test variant generation
 
-### File Management
-- [ ] Create ZIP packaging for converted projects
-- [ ] Implement temporary file cleanup policies
-- [ ] Add download link generation and expiration
-- [ ] Handle large project packaging efficiently
-- [ ] **NEW**: Include CI/CD configurations in packaged output
-- [ ] **NEW**: Package Docker configurations and documentation
+4. **Implement advanced pattern conversion**
+   - Create selector file to locator converter
+   - Implement custom command to Page Object transformer
+   - Add viewport and device configuration converter
+   - Build mobile/desktop variant generator
 
-## Phase 6: Testing and Documentation (Week 6)
+5. **Write test suite for Kitchen Sink repository patterns**
+   - Test comprehensive Cypress API coverage mapping
+   - Test advanced assertion patterns and custom matchers
+   - Test component tests, API tests, and visual test conversion
+   - Test educational comment preservation
 
-### Comprehensive Testing
-- [ ] Write unit tests for all core components
-- [ ] Create integration tests for full conversion workflow
-- [ ] Implement performance tests for large repositories
-- [ ] Add error scenario testing and recovery
-- [ ] **NEW**: Test conversion of kitchen sink patterns
-- [ ] **NEW**: Validate CI/CD pipeline conversions
-- [ ] **NEW**: Test Docker integration scenarios
+6. **Implement Kitchen Sink specific conversions**
+   - Create comprehensive API pattern mapping
+   - Implement advanced assertion converter
+   - Add component and API test converters
+   - Build comment and documentation preservation system
 
-### Documentation and Examples
-- [ ] Create API documentation with examples
-- [ ] Write user guide for the conversion process
-- [ ] Document supported project structures and limitations
-- [ ] Create troubleshooting guide for common issues
-- [ ] **NEW**: Document CI/CD conversion patterns and best practices
-- [ ] **NEW**: Create Docker migration guide
+7. **Write test suite for dependency management**
+   - Test isolated environment creation
+   - Test Playwright dependency installation
+   - Test dependency conflict resolution
+   - Test plugin equivalency suggestions
 
-## Phase 7: Target Repository Validation (Week 7)
+8. **Implement dependency management system**
+   - Create isolated conversion environment
+   - Implement automatic Playwright dependency installation
+   - Add dependency conflict resolver
+   - Build plugin equivalency recommendation engine
 
-### helenanull/cypress-example Testing
-- [ ] Test conversion of helenanull/cypress-example repository specifically
-- [ ] Validate centralized selector file conversion (cypress/selectors/)
-- [ ] Verify .cmd.js custom command processing
-- [ ] Test dynamic viewport and device configuration handling
-- [ ] Validate environment-based configuration conversion
-- [ ] Generate and test mobile/desktop variants
-- [ ] Create detailed conversion report for this reference project
+### Task 3: CI/CD and Infrastructure Migration
 
-### cypress-io/cypress-example-kitchensink Testing
-- [ ] **NEW**: Test conversion of cypress-example-kitchensink repository
-- [ ] **NEW**: Validate comprehensive Cypress API pattern conversion
-- [ ] **NEW**: Test CI/CD configuration migration (GitHub Actions, CircleCI, AppVeyor)
-- [ ] **NEW**: Verify Docker configuration conversion
-- [ ] **NEW**: Test script migration accuracy
-- [ ] **NEW**: Validate plugin ecosystem suggestions
-- [ ] **NEW**: Test educational comment preservation
-- [ ] **NEW**: Generate comprehensive conversion report with before/after analysis
+**Objective**: Convert CI/CD pipelines and infrastructure configurations from Cypress to Playwright.
 
-### Cross-Repository Compatibility
-- [ ] **NEW**: Test converter with both repositories simultaneously
-- [ ] **NEW**: Verify consistent conversion patterns across different repository structures
-- [ ] **NEW**: Document repository-specific conversion patterns discovered
-- [ ] **NEW**: Create compatibility matrix for different Cypress project types
+1. **Write test suite for GitHub Actions conversion**
+   - Test workflow file parsing and conversion
+   - Test parallel execution pattern migration
+   - Test artifact collection and reporting conversion
+   - Test browser matrix configuration conversion
 
-## Success Metrics
+2. **Implement GitHub Actions converter**
+   - Create GitHub Actions workflow parser
+   - Implement Cypress to Playwright action replacement
+   - Add parallel execution pattern converter
+   - Build artifact and reporting configuration migrator
 
-### Technical Metrics
-- [ ] Convert 100% of Cypress test files successfully
-- [ ] Maintain 95%+ test coverage after conversion
-- [ ] Generate functional Playwright configurations
-- [ ] Process repositories up to 500MB in size within 10 minutes
+3. **Write test suite for multi-platform CI conversion**
+   - Test CircleCI configuration conversion
+   - Test AppVeyor YAML configuration migration
+   - Test multi-browser configuration matrices
+   - Test environment-specific configurations
 
-### Repository-Specific Metrics
-- [ ] **helenanull/cypress-example**: All selector patterns converted accurately
-- [ ] **cypress-example-kitchensink**: All CI/CD configurations migrated successfully
-- [ ] Both repositories: Converted tests pass in Playwright environment
-- [ ] Documentation and comments preserved where applicable
+4. **Implement multi-platform CI converters**
+   - Create CircleCI configuration converter
+   - Implement AppVeyor configuration migrator
+   - Add multi-browser matrix converter
+   - Build environment configuration migrator
 
-### Quality Metrics
-- [ ] Zero critical security vulnerabilities in generated code
-- [ ] All generated Playwright projects follow best practices
-- [ ] Conversion reports provide actionable feedback for manual steps
-- [ ] API response times under 200ms for status checks
+5. **Write test suite for Docker integration**
+   - Test Dockerfile conversion for Playwright
+   - Test docker-compose.yml transformation
+   - Test container-based test execution patterns
+   - Test service dependency configurations
+
+6. **Implement Docker configuration converter**
+   - Create Dockerfile converter for Playwright environments
+   - Implement docker-compose.yml transformer
+   - Add container test execution pattern converter
+   - Build service dependency migrator
+
+7. **Write test suite for build scripts and automation**
+   - Test package.json script migration
+   - Test custom build script conversion
+   - Test start-server-and-test pattern migration
+   - Test deployment script updates
+
+8. **Implement build script converter**
+   - Create package.json script migrator
+   - Implement custom build script converter
+   - Add start-server-and-test pattern migrator
+   - Build deployment script updater
+
+### Task 4: API and Service Layer
+
+**Objective**: Create robust REST API for GitHub project conversion with real-time progress tracking.
+
+1. **Write test suite for core conversion API endpoints**
+   - Test conversion initiation endpoint (POST /api/convert/github)
+   - Test status tracking endpoint (GET /api/convert/{id}/status)
+   - Test download endpoint (GET /api/convert/{id}/download)
+   - Test cleanup endpoint (DELETE /api/convert/{id})
+
+2. **Implement core conversion API**
+   - Create conversion initiation endpoint with GitHub URL validation
+   - Implement status tracking with real-time updates
+   - Add download endpoint with secure file serving
+   - Build cleanup endpoint with proper resource management
+
+3. **Write test suite for analysis and reporting endpoints**
+   - Test conversion report endpoint (GET /api/convert/{id}/report)
+   - Test CI/CD configuration analysis endpoint
+   - Test plugin compatibility check endpoint
+   - Test selector analysis endpoint
+
+4. **Implement analysis and reporting API**
+   - Create detailed conversion report generator
+   - Implement CI/CD configuration analyzer endpoint
+   - Add plugin compatibility checker
+   - Build selector analysis and recommendation engine
+
+5. **Write test suite for background processing system**
+   - Test job queue implementation
+   - Test progress tracking and real-time updates
+   - Test timeout handling and job cancellation
+   - Test large repository processing
+
+6. **Implement background processing infrastructure**
+   - Set up job queue system for long-running conversions
+   - Implement real-time progress tracking with WebSocket support
+   - Add timeout handling and graceful job cancellation
+   - Create worker process architecture
+
+7. **Write test suite for caching and performance**
+   - Test conversion result caching
+   - Test performance optimization for large repositories
+   - Test concurrent conversion handling
+   - Test resource usage monitoring
+
+8. **Implement caching and performance optimizations**
+   - Add intelligent conversion result caching
+   - Implement performance optimizations for large repositories
+   - Build concurrent conversion management
+   - Add resource usage monitoring and throttling
+
+### Task 5: Validation and Packaging
+
+**Objective**: Ensure conversion accuracy and create professional project packages.
+
+1. **Write test suite for syntax validation**
+   - Test basic syntax validation for converted tests
+   - Test Playwright configuration validation
+   - Test locator strategy validation
+   - Test import/export statement validation
+
+2. **Implement syntax validation engine**
+   - Create converted test syntax validator
+   - Implement Playwright configuration validator
+   - Add locator strategy validator
+   - Build import/export statement checker
+
+3. **Write test suite for execution validation**
+   - Test optional converted test execution
+   - Test environment setup validation
+   - Test dependency resolution validation
+   - Test browser compatibility validation
+
+4. **Implement execution validation system**
+   - Create optional test execution validator
+   - Implement environment setup checker
+   - Add dependency resolution validator
+   - Build browser compatibility tester
+
+5. **Write test suite for conversion reporting**
+   - Test detailed conversion report generation
+   - Test error categorization and suggestions
+   - Test before/after comparison reports
+   - Test CI/CD migration analysis reports
+
+6. **Implement comprehensive reporting system**
+   - Create detailed conversion report generator
+   - Implement intelligent error categorization
+   - Add before/after comparison analysis
+   - Build CI/CD migration assessment reports
+
+7. **Write test suite for project packaging**
+   - Test ZIP packaging for converted projects
+   - Test file organization and structure
+   - Test download link generation and expiration
+   - Test large project packaging efficiency
+
+8. **Implement project packaging system**
+   - Create efficient ZIP packaging system
+   - Implement proper file organization
+   - Add secure download link generation
+   - Build large project packaging optimizer
+
+### Task 6: Testing and Documentation
+
+**Objective**: Ensure system reliability through comprehensive testing and clear documentation.
+
+1. **Write comprehensive unit test suite**
+   - Test all core component functionality
+   - Test error handling and edge cases
+   - Test performance characteristics
+   - Test security validation
+
+2. **Implement unit testing infrastructure**
+   - Set up comprehensive test framework
+   - Implement mock services for external dependencies
+   - Add performance benchmarking
+   - Create security testing suite
+
+3. **Write integration test suite**
+   - Test full conversion workflow end-to-end
+   - Test API integration scenarios
+   - Test background processing workflows
+   - Test multi-repository conversion scenarios
+
+4. **Implement integration testing system**
+   - Create end-to-end workflow tests
+   - Implement API integration test suite
+   - Add background processing workflow tests
+   - Build multi-repository test scenarios
+
+5. **Write performance and scalability tests**
+   - Test large repository processing
+   - Test concurrent conversion handling
+   - Test memory and resource usage
+   - Test system limits and bottlenecks
+
+6. **Implement performance testing infrastructure**
+   - Create large repository test scenarios
+   - Implement concurrent processing tests
+   - Add resource monitoring and alerting
+   - Build scalability testing suite
+
+7. **Write comprehensive documentation**
+   - Create API documentation with examples
+   - Write user guide for conversion process
+   - Document supported patterns and limitations
+   - Create troubleshooting and FAQ guide
+
+8. **Implement documentation system**
+   - Generate interactive API documentation
+   - Create comprehensive user guide
+   - Build pattern and limitation reference
+   - Develop troubleshooting knowledge base
+
+### Task 7: Target Repository Validation
+
+**Objective**: Validate conversion accuracy with specific target repositories and ensure cross-repository compatibility.
+
+1. **Write test suite for helenanull/cypress-example validation**
+   - Test complete repository conversion workflow
+   - Test centralized selector file conversion accuracy
+   - Test custom command (.cmd.js) processing
+   - Test viewport and device configuration handling
+
+2. **Implement helenanull/cypress-example validation**
+   - Execute complete conversion of helenanull/cypress-example
+   - Validate selector pattern conversion accuracy
+   - Test custom command to Page Object conversion
+   - Verify viewport and device configuration migration
+
+3. **Write test suite for cypress-example-kitchensink validation**
+   - Test comprehensive API pattern conversion
+   - Test CI/CD configuration migration accuracy
+   - Test Docker configuration conversion
+   - Test educational comment preservation
+
+4. **Implement cypress-example-kitchensink validation**
+   - Execute complete conversion of cypress-example-kitchensink
+   - Validate comprehensive API pattern migration
+   - Test CI/CD pipeline conversion accuracy
+   - Verify educational content preservation
+
+5. **Write cross-repository compatibility tests**
+   - Test converter with both repositories simultaneously
+   - Test consistent conversion patterns across repositories
+   - Test compatibility matrix generation
+   - Test repository-specific optimization detection
+
+6. **Implement cross-repository compatibility validation**
+   - Run simultaneous conversion tests
+   - Validate pattern consistency across repositories
+   - Generate compatibility matrix
+   - Document repository-specific patterns
+
+7. **Write comprehensive validation reporting tests**
+   - Test detailed conversion success metrics
+   - Test before/after functionality comparison
+   - Test performance impact analysis
+   - Test recommendation and improvement suggestions
+
+8. **Implement comprehensive validation reporting**
+   - Generate detailed success metrics
+   - Create before/after functionality comparison
+   - Analyze performance impact
+   - Provide actionable recommendations and improvements
+
+## Success Criteria
+
+- **Technical Excellence**: 100% test coverage, zero critical vulnerabilities, <200ms API response times
+- **Conversion Accuracy**: 95%+ test functionality preservation, complete configuration migration
+- **Repository Compatibility**: Successful conversion of both target repositories with full feature coverage
+- **Documentation Quality**: Comprehensive guides, clear troubleshooting, actionable recommendations
+- **Performance Standards**: Process 500MB repositories in <10 minutes, handle concurrent conversions efficiently

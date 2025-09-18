@@ -29,7 +29,34 @@ describe('CLI', () => {
   });
 
   afterEach(async () => {
-    await fs.remove(testDir);
+    try {
+      // Force removal of the directory and all its contents
+      if (await fs.pathExists(testDir)) {
+        // First try to empty the directory recursively
+        await fs.emptyDir(testDir);
+        // Then remove the empty directory
+        await fs.rmdir(testDir);
+      }
+    } catch (error) {
+      // If standard removal fails, try alternative cleanup
+      try {
+        // Use remove with force option
+        await fs.remove(testDir);
+      } catch (secondError) {
+        // As a last resort, try to remove contents one by one
+        try {
+          if (await fs.pathExists(testDir)) {
+            const entries = await fs.readdir(testDir);
+            for (const entry of entries) {
+              await fs.remove(path.join(testDir, entry));
+            }
+            await fs.rmdir(testDir);
+          }
+        } catch (thirdError) {
+          // Silently fail - the temp directory will be cleaned up eventually
+        }
+      }
+    }
   });
 
   describe('argument parsing', () => {
