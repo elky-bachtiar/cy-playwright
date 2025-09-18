@@ -26,7 +26,7 @@
 
 ### Features
 
-- [ ] Configuration migration - Convert cypress.config.js to playwright.config.js `L`
+- [x] Configuration migration - Convert cypress.config.js to playwright.config.js `L`
 - [ ] Custom command conversion - Transform Cypress.Commands.add() to Page Object methods `XL`
 - [ ] Intercept/Route conversion - Migrate cy.intercept() to page.route() patterns `L`
 - [ ] Fixture handling - Convert Cypress fixtures to Playwright test data `M`
