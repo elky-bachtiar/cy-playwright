@@ -101,6 +101,23 @@ export class DatabaseManager {
     }
   }
 
+  async isConnected(): Promise<boolean> {
+    return this.connected;
+  }
+
+  async getConnectionInfo(): Promise<Record<string, any>> {
+    return {
+      connected: this.connected,
+      host: this.config.host,
+      port: this.config.port,
+      database: this.config.database,
+      activeConnections: this.connections.length,
+      connectionTimeout: this.config.connectionTimeout || 30000,
+      queryTimeout: this.config.queryTimeout || 60000,
+      poolSize: this.config.poolSize || 10
+    };
+  }
+
   async isHealthy(): Promise<boolean> {
     return this.connected && await this.testConnection();
   }

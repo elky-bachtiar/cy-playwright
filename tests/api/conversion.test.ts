@@ -200,7 +200,7 @@ describe('Conversion API Endpoints', () => {
     it('should return conversion status for valid job ID', async () => {
       const mockStatus = {
         jobId: mockJobId,
-        status: 'processing',
+        status: 'in_progress',
         progress: 45,
         currentStep: 'Converting test files',
         filesProcessed: 3,
@@ -330,7 +330,7 @@ describe('Conversion API Endpoints', () => {
     it('should return 400 for incomplete conversion', async () => {
       mockConversionService.prototype.getConversionStatus.mockResolvedValue({
         jobId: mockJobId,
-        status: 'processing'
+        status: 'in_progress'
       });
 
       const response = await request(app)
@@ -350,7 +350,7 @@ describe('Conversion API Endpoints', () => {
       });
 
       mockConversionService.prototype.getDownloadPath.mockResolvedValue('/path/to/missing.zip');
-      mockFs.readFile.mockRejectedValue(new Error('ENOENT: no such file or directory'));
+      (mockFs.readFile as jest.MockedFunction<any>).mockRejectedValue(new Error('ENOENT: no such file or directory'));
 
       const response = await request(app)
         .get(`/api/convert/${mockJobId}/download`)
@@ -369,7 +369,7 @@ describe('Conversion API Endpoints', () => {
     it('should successfully cancel ongoing conversion', async () => {
       mockConversionService.prototype.getConversionStatus.mockResolvedValue({
         jobId: mockJobId,
-        status: 'processing'
+        status: 'in_progress'
       });
 
       mockConversionService.prototype.cancelConversion.mockResolvedValue(true);

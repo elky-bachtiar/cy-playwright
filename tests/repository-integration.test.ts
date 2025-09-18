@@ -4,15 +4,15 @@ import * as path from 'path'
 import { RepositoryIntegrationService } from '../src/repository-integration'
 
 // Mock the external dependencies
-const mockListRemote = jest.fn()
-const mockClone = jest.fn()
-const mockEnsureDir = jest.fn()
-const mockRemove = jest.fn()
-const mockPathExists = jest.fn()
-const mockReaddir = jest.fn()
-const mockReadFile = jest.fn()
-const mockReadJSON = jest.fn()
-const mockStat = jest.fn()
+const mockListRemote = jest.fn() as jest.MockedFunction<any>
+const mockClone = jest.fn() as jest.MockedFunction<any>
+const mockEnsureDir = jest.fn() as jest.MockedFunction<any>
+const mockRemove = jest.fn() as jest.MockedFunction<any>
+const mockPathExists = jest.fn() as jest.MockedFunction<any>
+const mockReaddir = jest.fn() as jest.MockedFunction<any>
+const mockReadFile = jest.fn() as jest.MockedFunction<any>
+const mockReadJSON = jest.fn() as jest.MockedFunction<any>
+const mockStat = jest.fn() as jest.MockedFunction<any>
 
 jest.mock('simple-git', () => ({
   simpleGit: () => ({
