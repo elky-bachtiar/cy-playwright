@@ -87,3 +87,44 @@ export interface ASTParseResult {
   customCommands?: CustomCommand[];
   error?: string;
 }
+
+export interface ConvertedCommand {
+  playwrightCode: string;
+  requiresAwait: boolean;
+  imports?: string[];
+  warnings?: string[];
+}
+
+export interface PlaywrightCode {
+  code: string;
+  imports: string[];
+  warnings: string[];
+}
+
+export interface PageObjectMethod {
+  className: string;
+  methodName: string;
+  parameters: string[];
+  playwrightCode: string;
+  imports: string[];
+}
+
+export interface CommandMapping {
+  cypressCommand: string;
+  playwrightEquivalent: string;
+  requiresAwait: boolean;
+  transformation?: (args: any[]) => string;
+}
+
+export interface AssertionMapping {
+  cypressAssertion: string;
+  playwrightAssertion: string;
+  transformation?: (args: any[]) => string;
+}
+
+export interface ConversionContext {
+  usesPageObject: boolean;
+  pageObjectName?: string;
+  imports: Set<string>;
+  warnings: string[];
+}
