@@ -18,6 +18,8 @@ import { ASTParser } from './ast-parser';
 import { ConfigMigrator } from './config-migrator';
 import { ProjectGenerator } from './project-generator';
 import { GitHubRepository } from './github-repository';
+import { GitLabRepository } from './gitlab-repository';
+import { RepositoryDetector } from './repository-detector';
 
 export class CLI {
   private program: Command;
@@ -25,6 +27,8 @@ export class CLI {
   private configMigrator: ConfigMigrator;
   private projectGenerator: ProjectGenerator;
   private githubRepo: GitHubRepository;
+  private gitlabRepo: GitLabRepository;
+  private repoDetector: RepositoryDetector;
 
   constructor() {
     this.program = new Command();
@@ -32,6 +36,8 @@ export class CLI {
     this.configMigrator = new ConfigMigrator();
     this.projectGenerator = new ProjectGenerator();
     this.githubRepo = new GitHubRepository();
+    this.gitlabRepo = new GitLabRepository();
+    this.repoDetector = new RepositoryDetector();
     this.setupCommands();
   }
 
@@ -70,6 +76,42 @@ export class CLI {
       .action(async (options) => {
         await this.handleGitHubConversion({
           githubUrl: options.githubUrl,
+          outputDir: options.output,
+          preserveStructure: options.preserveStructure,
+          generatePageObjects: options.generatePageObjects,
+          verbose: options.verbose
+        });
+      });
+
+    this.program
+      .command('convert-gitlab')
+      .description('Clone and convert Cypress project from GitLab repository')
+      .requiredOption('--gitlab-url <url>', 'GitLab repository URL to clone and convert')
+      .option('-o, --output <path>', 'Output directory for converted Playwright project', './playwright-project')
+      .option('--preserve-structure', 'Preserve original directory structure', false)
+      .option('--generate-page-objects', 'Generate page object models from custom commands', true)
+      .option('-v, --verbose', 'Enable verbose logging', false)
+      .action(async (options) => {
+        await this.handleGitLabConversion({
+          gitlabUrl: options.gitlabUrl,
+          outputDir: options.output,
+          preserveStructure: options.preserveStructure,
+          generatePageObjects: options.generatePageObjects,
+          verbose: options.verbose
+        });
+      });
+
+    this.program
+      .command('convert-repo')
+      .description('Auto-detect and convert Cypress project from GitHub or GitLab repository')
+      .requiredOption('--repo-url <url>', 'Repository URL (GitHub or GitLab) to clone and convert')
+      .option('-o, --output <path>', 'Output directory for converted Playwright project', './playwright-project')
+      .option('--preserve-structure', 'Preserve original directory structure', false)
+      .option('--generate-page-objects', 'Generate page object models from custom commands', true)
+      .option('-v, --verbose', 'Enable verbose logging', false)
+      .action(async (options) => {
+        await this.handleRepositoryConversion({
+          repoUrl: options.repoUrl,
           outputDir: options.output,
           preserveStructure: options.preserveStructure,
           generatePageObjects: options.generatePageObjects,
@@ -799,6 +841,165 @@ export class CLI {
       }
 
       process.exit(1);
+    }
+  }
+
+  private async handleGitLabConversion(options: {
+    gitlabUrl: string;
+    outputDir: string;
+    preserveStructure: boolean;
+    generatePageObjects: boolean;
+    verbose: boolean;
+  }): Promise<void> {
+    console.log('🚀 Starting GitLab repository conversion...');
+    console.log(`Repository: ${options.gitlabUrl}`);
+    console.log(`Output: ${options.outputDir}`);
+
+    let clonedPath: string | undefined;
+
+    try {
+      // Step 1: Parse and validate GitLab URL
+      const repoInfo = this.gitlabRepo.parseRepositoryUrl(options.gitlabUrl);
+      console.log(`📋 Repository: ${repoInfo.owner}/${repoInfo.repo} (${repoInfo.branch})`);
+
+      // Step 2: Validate repository accessibility
+      const validation = await this.gitlabRepo.validateAccess(options.gitlabUrl);
+      if (!validation.accessible) {
+        console.error('❌ Repository validation failed:');
+        console.error(`  - ${validation.error}`);
+        process.exit(1);
+      }
+
+      // Step 3: Clone repository to .conversion directory
+      const conversionDir = path.join(process.cwd(), '.conversion');
+      await fs.ensureDir(conversionDir);
+
+      clonedPath = path.join(conversionDir, `${repoInfo.owner}-${repoInfo.repo}`);
+
+      console.log(`📥 Cloning repository to: ${clonedPath}`);
+
+      const cloneResult = await this.gitlabRepo.cloneRepository(options.gitlabUrl, clonedPath, {
+        clean: true,
+        depth: 0, // Full clone to get all examples and branches
+        retries: 2
+      });
+
+      if (!cloneResult.success) {
+        console.error('❌ Failed to clone repository:');
+        console.error(`  - ${cloneResult.error}`);
+        process.exit(1);
+      }
+
+      console.log('✅ Repository cloned successfully');
+
+      // Step 4: Branch selection
+      console.log('🌿 Fetching available branches...');
+      const selectedBranch = await this.selectBranch(clonedPath);
+      if (!selectedBranch) {
+        console.log('❌ No branch selected. Conversion cancelled.');
+        process.exit(1);
+      }
+
+      // Step 5: Scan for Cypress projects in the repository
+      console.log('🔍 Scanning for Cypress projects...');
+      const scanResult = await this.scanForCypressProjects(clonedPath);
+
+      // Step 6: Select project directory (interactive if multiple found)
+      const selectedProjectPath = await this.selectCypressProject(scanResult.projects);
+      if (!selectedProjectPath) {
+        console.log('❌ Conversion cancelled or no valid project selected.');
+        process.exit(1);
+      }
+
+      // Step 7: Validate selected project
+      const projectValidation = await this.validateCypressProject(selectedProjectPath);
+      if (!projectValidation.isValid) {
+        console.error('❌ Invalid Cypress project:');
+        projectValidation.errors?.forEach(error => console.error(`  - ${error}`));
+        process.exit(1);
+      }
+
+      // Step 8: Run conversion within the selected project directory
+      console.log('🔄 Starting conversion within selected project...');
+      console.log(`📁 Converting: ${path.relative(clonedPath, selectedProjectPath) || '.'}`);
+
+      // Convert in-place - place Playwright files alongside Cypress files
+      await this.handleConversion({
+        sourceDir: selectedProjectPath,
+        outputDir: selectedProjectPath, // Use same directory as source
+        preserveStructure: options.preserveStructure,
+        generatePageObjects: options.generatePageObjects,
+        verbose: options.verbose
+      });
+
+      console.log(`\n🎉 GitLab repository conversion completed!`);
+      console.log(`📁 Cloned repository: ${clonedPath}`);
+      console.log(`📁 Converted project: ${selectedProjectPath}`);
+
+    } catch (error) {
+      console.error('❌ GitLab conversion failed:', error);
+
+      // Cleanup on error
+      if (clonedPath && await fs.pathExists(clonedPath)) {
+        try {
+          console.log('🧹 Cleaning up failed conversion...');
+          await fs.remove(clonedPath);
+        } catch (cleanupError) {
+          console.warn(`⚠️ Failed to cleanup ${clonedPath}:`, cleanupError);
+        }
+      }
+
+      process.exit(1);
+    }
+  }
+
+  private async handleRepositoryConversion(options: {
+    repoUrl: string;
+    outputDir: string;
+    preserveStructure: boolean;
+    generatePageObjects: boolean;
+    verbose: boolean;
+  }): Promise<void> {
+    console.log('🚀 Starting repository conversion...');
+    console.log(`Repository: ${options.repoUrl}`);
+
+    // Step 1: Auto-detect platform
+    const detection = this.repoDetector.detectPlatform(options.repoUrl);
+
+    if (!detection.isValid) {
+      console.error('❌ Repository URL validation failed:');
+      console.error(`  - ${detection.error}`);
+      process.exit(1);
+    }
+
+    console.log(`🔍 Detected platform: ${detection.platform.toUpperCase()}`);
+
+    // Step 2: Route to appropriate handler
+    switch (detection.platform) {
+      case 'github':
+        await this.handleGitHubConversion({
+          githubUrl: options.repoUrl,
+          outputDir: options.outputDir,
+          preserveStructure: options.preserveStructure,
+          generatePageObjects: options.generatePageObjects,
+          verbose: options.verbose
+        });
+        break;
+
+      case 'gitlab':
+        await this.handleGitLabConversion({
+          gitlabUrl: options.repoUrl,
+          outputDir: options.outputDir,
+          preserveStructure: options.preserveStructure,
+          generatePageObjects: options.generatePageObjects,
+          verbose: options.verbose
+        });
+        break;
+
+      default:
+        console.error('❌ Unsupported repository platform');
+        console.error(`  - Supported platforms: GitHub, GitLab`);
+        process.exit(1);
     }
   }
 
