@@ -1,0 +1,3 @@
+# Spec Summary (Lite)
+
+Create a CLI tool that converts complete Cypress projects to Playwright projects by parsing test files, configuration files, and custom commands, then generating equivalent Playwright project structure and code. This tool will automate the full migration process from Cypress to Playwright framework, preserving test coverage while translating syntax and configurations to maintain functionality during framework transition.
