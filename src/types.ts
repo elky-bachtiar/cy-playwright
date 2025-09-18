@@ -33,3 +33,57 @@ export interface ConversionOptions {
   generatePageObjects?: boolean;
   verbose?: boolean;
 }
+
+export interface CypressCommand {
+  command: string;
+  args: (string | number | boolean)[];
+  chainedCalls?: ChainedCall[];
+  lineNumber?: number;
+}
+
+export interface ChainedCall {
+  method: string;
+  args: (string | number | boolean)[];
+}
+
+export interface CypressTest {
+  name: string;
+  commands: CypressCommand[];
+  lineNumber?: number;
+}
+
+export interface CypressDescribe {
+  name: string;
+  tests: CypressTest[];
+  describes?: CypressDescribe[];
+  lineNumber?: number;
+}
+
+export interface ImportStatement {
+  namedImports?: string[];
+  defaultImport?: string;
+  source: string;
+}
+
+export interface CypressTestFile {
+  filePath: string;
+  describes: CypressDescribe[];
+  cypressCommands: CypressCommand[];
+  imports?: ImportStatement[];
+  customCommands?: CustomCommand[];
+}
+
+export interface CustomCommand {
+  name: string;
+  type: 'add' | 'overwrite';
+  parameters: string[];
+  body: string;
+  lineNumber?: number;
+}
+
+export interface ASTParseResult {
+  success: boolean;
+  testFile?: CypressTestFile;
+  customCommands?: CustomCommand[];
+  error?: string;
+}

@@ -10,13 +10,13 @@
   - [x] 1.5 Implement project directory validation and scanning
   - [x] 1.6 Verify all tests pass
 
-- [ ] 2. Build AST parsing engine for Cypress files
-  - [ ] 2.1 Write tests for TypeScript AST parsing and file detection
-  - [ ] 2.2 Implement Cypress test file scanner (.spec.js, .spec.ts, .cy.js, .cy.ts)
-  - [ ] 2.3 Create AST parser using TypeScript Compiler API
-  - [ ] 2.4 Build Cypress command extraction from syntax trees
-  - [ ] 2.5 Implement custom command detection and parsing
-  - [ ] 2.6 Verify all tests pass
+- [x] 2. Build AST parsing engine for Cypress files
+  - [x] 2.1 Write tests for TypeScript AST parsing and file detection
+  - [x] 2.2 Implement Cypress test file scanner (.spec.js, .spec.ts, .cy.js, .cy.ts)
+  - [x] 2.3 Create AST parser using TypeScript Compiler API
+  - [x] 2.4 Build Cypress command extraction from syntax trees
+  - [x] 2.5 Implement custom command detection and parsing
+  - [x] 2.6 Verify all tests pass
 
 - [ ] 3. Create command mapping and conversion system
   - [ ] 3.1 Write tests for Cypress to Playwright command mapping
