@@ -65,6 +65,10 @@ export class CommandConverter {
 
     if (mapping.transformation) {
       playwrightCode = mapping.transformation(command.args);
+      // Add warning for wait with alias
+      if (command.command === 'wait' && typeof command.args[0] === 'string' && command.args[0].startsWith('@')) {
+        context.warnings.push('cy.wait(@alias) converted to generic API wait - may need manual adjustment');
+      }
     } else {
       const args = this.formatArguments(command.args);
       playwrightCode = `${mapping.playwrightEquivalent}${args}`;
@@ -92,16 +96,21 @@ export class CommandConverter {
     // Start with the base command
     const baseLocator = this.getBaseLocator(command, context);
 
-    // Check if any chained call is an assertion
+    // Handle multiple chained calls (including those with assertions)
+    if (command.chainedCalls!.length > 1) {
+      return this.convertMultipleChainedCalls(command, context);
+    }
+
+    // Handle special case for action commands with single chained calls
+    if (['intercept', 'wait', 'visit'].includes(command.command)) {
+      return this.convertMultipleChainedCalls(command, context);
+    }
+
+    // Check if single chained call is an assertion
     const hasAssertion = command.chainedCalls!.some(call => call.method === 'should');
 
     if (hasAssertion) {
       return this.convertCommandWithAssertion(command, context);
-    }
-
-    // Handle multiple non-assertion chained calls
-    if (command.chainedCalls!.length > 1) {
-      return this.convertMultipleChainedCalls(command, context);
     }
 
     // Handle single chained call
@@ -175,9 +184,34 @@ export class CommandConverter {
    * Convert multiple chained calls into separate statements
    */
   private convertMultipleChainedCalls(command: CypressCommand, context: ConversionContext): ConvertedCommand {
-    const baseLocator = this.getBaseLocator(command, context);
     const statements: string[] = [];
     let requiresAwait = false;
+
+    // For certain commands like intercept, we need to execute the base command
+    if (['intercept', 'wait', 'visit'].includes(command.command)) {
+      const mapping = this.commandMappings.get(command.command);
+      if (mapping) {
+        let baseStatement: string;
+        if (mapping.transformation) {
+          baseStatement = mapping.transformation(command.args);
+          // Add warning for wait with alias in this context too
+          if (command.command === 'wait' && typeof command.args[0] === 'string' && command.args[0].startsWith('@')) {
+            context.warnings.push('cy.wait(@alias) converted to generic API wait - may need manual adjustment');
+          }
+        } else {
+          const args = this.formatArguments(command.args);
+          baseStatement = `${mapping.playwrightEquivalent}${args}`;
+        }
+
+        if (mapping.requiresAwait) {
+          baseStatement = `await ${baseStatement}`;
+          requiresAwait = true;
+        }
+        statements.push(baseStatement);
+      }
+    }
+
+    const baseLocator = this.getBaseLocator(command, context);
 
     for (const chainedCall of command.chainedCalls!) {
       if (chainedCall.method === 'should') {
@@ -201,11 +235,13 @@ export class CommandConverter {
         // Handle action
         const converted = this.convertChainedCall(baseLocator, chainedCall, context);
         let statement = converted.code;
-        if (converted.requiresAwait) {
-          statement = `await ${statement}`;
-          requiresAwait = true;
+        if (statement.trim()) { // Only add non-empty statements
+          if (converted.requiresAwait) {
+            statement = `await ${statement}`;
+            requiresAwait = true;
+          }
+          statements.push(statement);
         }
-        statements.push(statement);
       }
     }
 
@@ -264,6 +300,10 @@ export class CommandConverter {
         return { code: `${baseLocator}.focus()`, requiresAwait: true };
       case 'blur':
         return { code: `${baseLocator}.blur()`, requiresAwait: true };
+      case 'as':
+        // Cypress aliases are not needed in Playwright in the same way
+        context.warnings.push(`Cypress alias '${chainedCall.args[0]}' converted - consider storing in variable instead`);
+        return { code: '', requiresAwait: false };
       default:
         context.warnings.push(`Unknown chained method: ${chainedCall.method}`);
         return { code: `${baseLocator}./* TODO: ${chainedCall.method} */`, requiresAwait: false };
@@ -280,7 +320,33 @@ export class CommandConverter {
     switch (assertionType) {
       case 'include':
         return {
-          playwrightCode: `await expect(page).toHaveURL(/.*${this.escapeRegex(expectedValue as string)}.*/)`
+          playwrightCode: `await expect(page).toHaveURL(/.*${this.escapeRegex(expectedValue as string)}.*/)`,
+          requiresAwait: true,
+          imports: Array.from(context.imports)
+        };
+      case 'eq':
+        return {
+          playwrightCode: `await expect(page).toHaveURL('${expectedValue}')`,
+          requiresAwait: true,
+          imports: Array.from(context.imports)
+        };
+      default:
+        context.warnings.push(`Unknown URL assertion: ${assertionType}`);
+        return {
+          playwrightCode: `// TODO: Convert unknown URL assertion: ${assertionType}`,
+          requiresAwait: true,
+          warnings: Array.from(context.warnings),
+          imports: Array.from(context.imports)
+        };
+    }
+  }
+
+  /**
+   * Optimize CSS selectors to use Playwright's semantic selectors
+   */
+  private optimizeSelector(selector: string): string {
+    // Handle data-testid
+    const testIdMatch = selector.match(/\[data-testid=["']([^"']+)["']\]/) ||
                        selector.match(/\[data-testid=([^[\]]+)\]/);
     if (testIdMatch) {
       const value = testIdMatch[1].replace(/['"]/g, '');
@@ -460,7 +526,7 @@ export class CommandConverter {
         transformation: (args: any[]) => {
           const method = args[0];
           const url = args[1];
-          return `await page.route('${url}', route => route.continue())`;
+          return `page.route('${url}', route => route.continue())`;
         }
       }]
     ]);
@@ -543,6 +609,6 @@ export class CommandConverter {
    * Escape regex special characters
    */
   private escapeRegex(str: string): string {
-    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return str.replace(/[.*+?^${}()|[\]\\\/]/g, '\\$&');
   }
 }

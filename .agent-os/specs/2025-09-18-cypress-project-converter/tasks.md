@@ -21,24 +21,24 @@
   - [ ] 2.8 Extend scanner to detect .cmd.js custom command files
   - [ ] 2.9 Parse dynamic viewport and device configuration patterns
 
-- [ ] 3. Create command mapping and conversion system
-  - [ ] 3.1 Write tests for Cypress to Playwright command mapping
-  - [ ] 3.2 Implement core command mapping tables (cy.get → page.locator, cy.click → locator.click)
-  - [ ] 3.3 Build assertion conversion system (should → expect)
-  - [ ] 3.4 Create async/await pattern injection for Playwright syntax
-  - [ ] 3.5 Implement custom command to page object conversion
-  - [ ] 3.6 Verify all tests pass
+- [x] 3. Create command mapping and conversion system
+  - [x] 3.1 Write tests for Cypress to Playwright command mapping
+  - [x] 3.2 Implement core command mapping tables (cy.get → page.locator, cy.click → locator.click)
+  - [x] 3.3 Build assertion conversion system (should → expect)
+  - [x] 3.4 Create async/await pattern injection for Playwright syntax
+  - [x] 3.5 Implement custom command to page object conversion
+  - [x] 3.6 Verify all tests pass
   - [ ] 3.7 Implement selector-to-locator mapping system for centralized selectors
   - [ ] 3.8 Add device-specific command mapping for mobile/desktop variants
   - [ ] 3.9 Handle .cmd.js custom command to page object conversion
 
-- [ ] 4. Develop configuration migration system
-  - [ ] 4.1 Write tests for configuration file parsing and conversion
-  - [ ] 4.2 Parse cypress.config.js and extract settings
-  - [ ] 4.3 Map Cypress configuration to Playwright equivalents
-  - [ ] 4.4 Generate playwright.config.js with proper browser and viewport settings
-  - [ ] 4.5 Handle environment variables and custom configuration
-  - [ ] 4.6 Verify all tests pass
+- [x] 4. Develop configuration migration system
+  - [x] 4.1 Write tests for configuration file parsing and conversion
+  - [x] 4.2 Parse cypress.config.js and extract settings
+  - [x] 4.3 Map Cypress configuration to Playwright equivalents
+  - [x] 4.4 Generate playwright.config.js with proper browser and viewport settings
+  - [x] 4.5 Handle environment variables and custom configuration
+  - [x] 4.6 Verify all tests pass
   - [ ] 4.7 Implement dynamic viewport configuration detection and parsing
   - [ ] 4.8 Map Cypress viewport configs to Playwright device emulation
   - [ ] 4.9 Parse environment-based configuration files and .env files
