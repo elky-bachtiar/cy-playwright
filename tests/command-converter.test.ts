@@ -210,7 +210,7 @@ describe('CommandConverter', () => {
 
       const result = converter.convertCommand(cypressCommand);
 
-      expect(result.playwrightCode).toContain('await page.route(\'/api/users\'');
+      expect(result.playwrightCode).toContain('await page.route(\'**/api/users\'');
       expect(result.requiresAwait).toBe(true);
     });
   });
@@ -262,8 +262,8 @@ describe('CommandConverter', () => {
 
       const result = converter.convertCommand(cypressCommand);
 
-      expect(result.playwrightCode).toBe('// TODO: Convert unknown Cypress command: unknownCommand');
-      expect(result.warnings).toContain('Unknown Cypress command: unknownCommand');
+      expect(result.playwrightCode).toContain('// TODO: Convert custom command "unknownCommand"');
+      expect(result.warnings).toContain('Custom command "unknownCommand" requires manual conversion');
     });
 
     it('should handle complex chained methods with warnings', () => {

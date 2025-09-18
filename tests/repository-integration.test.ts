@@ -42,8 +42,8 @@ describe('RepositoryIntegrationService', () => {
     jest.clearAllMocks()
 
     // Set default mock implementations
-    mockEnsureDir.mockResolvedValue(undefined as any)
-    mockRemove.mockResolvedValue(undefined as any)
+    mockEnsureDir.mockResolvedValue(undefined)
+    mockRemove.mockResolvedValue(undefined)
     mockPathExists.mockResolvedValue(true)
     mockReaddir.mockResolvedValue([])
     mockReadFile.mockResolvedValue('')
@@ -59,7 +59,7 @@ describe('RepositoryIntegrationService', () => {
     test('should analyze helenanull/cypress-example repository', async () => {
       // Mock the repository exists
       mockListRemote.mockResolvedValue('origin')
-      mockClone.mockResolvedValue(undefined as any)
+      mockClone.mockResolvedValue(undefined)
 
       // Mock project structure
       mockPathExists.mockImplementation((filePath: any) => {
@@ -124,7 +124,7 @@ describe('RepositoryIntegrationService', () => {
     test('should analyze cypress-io/cypress-example-kitchensink repository', async () => {
       // Mock the repository exists
       mockListRemote.mockResolvedValue('origin')
-      mockClone.mockResolvedValue(undefined as any)
+      mockClone.mockResolvedValue(undefined)
 
       // Mock comprehensive project structure
       mockPathExists.mockImplementation((filePath: any) => {
@@ -220,7 +220,7 @@ describe('RepositoryIntegrationService', () => {
 
     test('should detect non-Cypress repositories', async () => {
       mockListRemote.mockResolvedValue('origin')
-      mockClone.mockResolvedValue(undefined as any)
+      mockClone.mockResolvedValue(undefined)
       mockPathExists.mockResolvedValue(false) // No cypress config files
 
       const result = await service.analyzeRepository('https://github.com/example/react-app.git')
@@ -234,7 +234,7 @@ describe('RepositoryIntegrationService', () => {
     test('should convert repository with proper cleanup', async () => {
       // Mock successful repository analysis
       mockListRemote.mockResolvedValue('origin')
-      mockClone.mockResolvedValue(undefined as any)
+      mockClone.mockResolvedValue(undefined)
       mockPathExists.mockResolvedValue(true)
 
       mockReadFile.mockImplementation((filePath: any) => {
@@ -261,7 +261,7 @@ describe('RepositoryIntegrationService', () => {
 
     test('should handle conversion failures with cleanup', async () => {
       mockListRemote.mockResolvedValue('origin')
-      mockClone.mockResolvedValue(undefined as any)
+      mockClone.mockResolvedValue(undefined)
       mockPathExists.mockResolvedValue(false) // No Cypress config
 
       const result = await service.convertRepository('https://github.com/example/not-cypress.git')
@@ -281,7 +281,7 @@ describe('RepositoryIntegrationService', () => {
 
       // Mock successful analysis for both repos
       mockListRemote.mockResolvedValue('origin')
-      mockClone.mockResolvedValue(undefined as any)
+      mockClone.mockResolvedValue(undefined)
       mockPathExists.mockResolvedValue(true)
       mockReadFile.mockResolvedValue('module.exports = { e2e: {} }')
 
@@ -304,7 +304,7 @@ describe('RepositoryIntegrationService', () => {
         .mockResolvedValueOnce('origin')
         .mockRejectedValueOnce(new Error('Not found'))
 
-      mockClone.mockResolvedValue(undefined as any)
+      mockClone.mockResolvedValue(undefined)
       mockPathExists.mockResolvedValue(true)
       mockReadFile.mockResolvedValue('module.exports = { e2e: {} }')
 
@@ -322,7 +322,7 @@ describe('RepositoryIntegrationService', () => {
       const progressCallback = jest.fn()
 
       mockListRemote.mockResolvedValue('origin')
-      mockClone.mockResolvedValue(undefined as any)
+      mockClone.mockResolvedValue(undefined)
       mockPathExists.mockResolvedValue(true)
       mockReadFile.mockResolvedValue('module.exports = { e2e: {} }')
 

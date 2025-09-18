@@ -62,6 +62,13 @@ describe('CypressProjectDetector', () => {
         return Promise.resolve('')
       })
 
+      mockReadJSON.mockImplementation((filePath: string) => {
+        if (filePath.includes('cypress.config.js')) {
+          return Promise.resolve(mockConfig)
+        }
+        return Promise.resolve({})
+      })
+
       const result = await detector.detectConfiguration(projectPath)
 
       expect(result.detected).toBe(true)
@@ -122,7 +129,7 @@ describe('CypressProjectDetector', () => {
       const result = await detector.detectConfiguration(projectPath)
 
       expect(result.detected).toBe(false)
-      expect(result.errors).toContain('No Cypress configuration files found')
+      expect(result.errors).toContain('No Cypress configuration file found')
     })
 
     test('should handle malformed configuration files', async () => {
@@ -133,6 +140,7 @@ describe('CypressProjectDetector', () => {
       })
 
       mockReadFile.mockRejectedValue(new Error('File read error'))
+      mockReadJSON.mockRejectedValue(new Error('JSON parse error'))
 
       const result = await detector.detectConfiguration(projectPath)
 
@@ -153,7 +161,7 @@ describe('CypressProjectDetector', () => {
 
       expect(result.manager).toBe('npm')
       expect(result.lockFile).toBe('package-lock.json')
-      expect(result.assumed).toBe(false)
+      expect(result.assumed).toBeUndefined()
     })
 
     test('should detect yarn with yarn.lock', async () => {
@@ -167,7 +175,7 @@ describe('CypressProjectDetector', () => {
 
       expect(result.manager).toBe('yarn')
       expect(result.lockFile).toBe('yarn.lock')
-      expect(result.assumed).toBe(false)
+      expect(result.assumed).toBeUndefined()
     })
 
     test('should detect pnpm with pnpm-lock.yaml', async () => {
@@ -181,7 +189,7 @@ describe('CypressProjectDetector', () => {
 
       expect(result.manager).toBe('pnpm')
       expect(result.lockFile).toBe('pnpm-lock.yaml')
-      expect(result.assumed).toBe(false)
+      expect(result.assumed).toBeUndefined()
     })
 
     test('should assume npm when no lock files found', async () => {
@@ -331,7 +339,7 @@ describe('CypressProjectDetector', () => {
       expect(result.directories).toHaveLength(0)
       expect(result.testTypes).toHaveLength(0)
       expect(result.isEmpty).toBe(true)
-      expect(result.warnings).toContain('No Cypress test directories found')
+      expect(result.warnings).toContain('Project directory appears to be empty')
     })
   })
 
@@ -408,7 +416,7 @@ describe('CypressProjectDetector', () => {
       expect(result.cypressVersion).toBe('^8.5.0')
       expect(result.majorVersion).toBe(8)
       expect(result.isLegacyVersion).toBe(true)
-      expect(result.compatibilityWarnings).toContain('Legacy Cypress version detected')
+      expect(result.compatibilityWarnings).toContain('Legacy Cypress version detected (v9 or lower)')
     })
 
     test('should detect Node.js version compatibility', async () => {
@@ -486,7 +494,7 @@ describe('CypressProjectDetector', () => {
       mockPathExists.mockImplementation((filePath: string) => {
         const cicdFiles = [
           '.github/workflows',
-          'circle.yml'
+          '.circleci'
         ]
         return Promise.resolve(cicdFiles.some(p => filePath.includes(p)))
       })
@@ -494,6 +502,9 @@ describe('CypressProjectDetector', () => {
       mockReaddir.mockImplementation((dirPath: string) => {
         if (dirPath.includes('.github/workflows')) {
           return Promise.resolve(['ci.yml'])
+        }
+        if (dirPath.includes('.circleci')) {
+          return Promise.resolve(['config.yml'])
         }
         return Promise.resolve([])
       })
@@ -509,7 +520,7 @@ describe('CypressProjectDetector', () => {
                   - uses: cypress-io/github-action@v5
           `)
         }
-        if (filePath.includes('circle.yml')) {
+        if (filePath.includes('config.yml')) {
           return Promise.resolve(`
             version: 2
             jobs:

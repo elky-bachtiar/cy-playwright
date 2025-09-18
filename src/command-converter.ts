@@ -29,6 +29,16 @@ export class CommandConverter {
     };
 
     try {
+      // Handle custom commands
+      if (this.isCustomCommand(cypressCommand.command)) {
+        return this.convertCustomCommand(cypressCommand, context);
+      }
+
+      // Handle advanced patterns first
+      if (this.isAdvancedPattern(cypressCommand)) {
+        return this.convertAdvancedPattern(cypressCommand, context);
+      }
+
       // Handle commands without chained calls first
       if (!cypressCommand.chainedCalls || cypressCommand.chainedCalls.length === 0) {
         return this.convertSingleCommand(cypressCommand, context);
@@ -43,6 +53,422 @@ export class CommandConverter {
         warnings: [`Error converting command: ${error}`]
       };
     }
+  }
+
+  /**
+   * Check if a command is a custom command (not built-in Cypress)
+   */
+  private isCustomCommand(command: string): boolean {
+    return !this.commandMappings.has(command) &&
+           !['get', 'contains', 'visit', 'wait', 'intercept', 'url', 'window', 'viewport', 'setCookie', 'fixture'].includes(command);
+  }
+
+  /**
+   * Check if a command uses advanced patterns requiring special handling
+   */
+  private isAdvancedPattern(cypressCommand: CypressCommand): boolean {
+    if (!cypressCommand.chainedCalls || cypressCommand.chainedCalls.length === 0) {
+      return false;
+    }
+
+    // Complex chaining with multiple assertions
+    const hasMultipleAssertions = cypressCommand.chainedCalls.filter(call => call.method === 'should' || call.method === 'and').length > 1;
+
+    // Complex locator patterns (within, find, first, etc.)
+    const hasComplexLocators = cypressCommand.chainedCalls.some(call =>
+      ['within', 'find', 'first', 'last', 'eq', 'filter', 'not'].includes(call.method)
+    );
+
+    // Advanced interaction patterns
+    const hasAdvancedInteractions = cypressCommand.chainedCalls.some(call =>
+      ['trigger', 'drag', 'selectFile', 'invoke', 'its', 'then'].includes(call.method)
+    );
+
+    // Storage and window operations
+    const hasStorageOperations = cypressCommand.command === 'window' && cypressCommand.chainedCalls.some(call =>
+      call.method === 'its' && (call.args[0] === 'localStorage' || call.args[0] === 'sessionStorage')
+    );
+
+    return hasMultipleAssertions || hasComplexLocators || hasAdvancedInteractions || hasStorageOperations;
+  }
+
+  /**
+   * Convert custom commands with appropriate warnings
+   */
+  private convertCustomCommand(cypressCommand: CypressCommand, context: ConversionContext): ConvertedCommand {
+    context.warnings.push(`Custom command "${cypressCommand.command}" requires manual conversion`);
+
+    const args = cypressCommand.args.length > 0 ? this.formatArguments(cypressCommand.args) : '()';
+    let playwrightCode = `// TODO: Convert custom command "${cypressCommand.command}"\nawait page.custom${cypressCommand.command.charAt(0).toUpperCase() + cypressCommand.command.slice(1)}${args}`;
+
+    // Handle chained calls on custom commands
+    if (cypressCommand.chainedCalls && cypressCommand.chainedCalls.length > 0) {
+      for (const chainedCall of cypressCommand.chainedCalls) {
+        playwrightCode += `\n// TODO: Handle chained call: ${chainedCall.method}`;
+        if (this.isCustomCommand(chainedCall.method)) {
+          context.warnings.push(`Custom command "${chainedCall.method}" requires manual conversion`);
+        }
+      }
+    }
+
+    return {
+      playwrightCode,
+      requiresAwait: true,
+      imports: Array.from(context.imports),
+      warnings: context.warnings
+    };
+  }
+
+  /**
+   * Convert advanced Cypress patterns to Playwright
+   */
+  private convertAdvancedPattern(cypressCommand: CypressCommand, context: ConversionContext): ConvertedCommand {
+    // Handle complex chaining with multiple assertions
+    if (this.hasMultipleAssertions(cypressCommand)) {
+      return this.convertMultipleAssertionPattern(cypressCommand, context);
+    }
+
+    // Handle complex locator patterns
+    if (this.hasComplexLocators(cypressCommand)) {
+      return this.convertComplexLocatorPattern(cypressCommand, context);
+    }
+
+    // Handle advanced interaction patterns
+    if (this.hasAdvancedInteractions(cypressCommand)) {
+      return this.convertAdvancedInteractionPattern(cypressCommand, context);
+    }
+
+    // Handle storage operations
+    if (this.hasStorageOperations(cypressCommand)) {
+      return this.convertStorageOperationPattern(cypressCommand, context);
+    }
+
+    // Fallback to regular conversion
+    return this.convertChainedCommand(cypressCommand, context);
+  }
+
+  /**
+   * Convert multiple assertion patterns
+   */
+  private convertMultipleAssertionPattern(cypressCommand: CypressCommand, context: ConversionContext): ConvertedCommand {
+    const baseLocator = this.getBaseLocator(cypressCommand, context);
+    const statements: string[] = [];
+    let currentElement = baseLocator;
+
+    // If we have multiple assertions on the same element, create a const
+    if (cypressCommand.chainedCalls!.filter(call => call.method === 'should' || call.method === 'and').length > 1) {
+      const elementName = this.generateElementVariableName(cypressCommand);
+      statements.push(`const ${elementName} = ${baseLocator}`);
+      currentElement = elementName;
+    }
+
+    for (const chainedCall of cypressCommand.chainedCalls!) {
+      if (chainedCall.method === 'should' || chainedCall.method === 'and') {
+        const assertionKey = chainedCall.args[0] as string;
+        const assertionMapping = this.assertionMappings.get(assertionKey);
+
+        if (assertionMapping) {
+          let assertion: string;
+          if (assertionMapping.transformation) {
+            assertion = assertionMapping.transformation([currentElement, ...chainedCall.args.slice(1)]);
+          } else {
+            const additionalArgs = chainedCall.args.slice(1);
+            const formattedArgs = additionalArgs.length > 0 ? this.formatArguments(additionalArgs) : '()';
+            assertion = `await expect(${currentElement}).${assertionMapping.playwrightAssertion}${formattedArgs}`;
+          }
+          statements.push(assertion);
+        } else {
+          context.warnings.push(`Unknown assertion: ${assertionKey}`);
+          statements.push(`// TODO: Convert unknown assertion: ${assertionKey}`);
+        }
+      } else {
+        // Handle non-assertion methods
+        const converted = this.convertChainedCall(currentElement, chainedCall, context);
+        if (converted.code.trim()) {
+          let statement = converted.code;
+          if (converted.requiresAwait) {
+            statement = `await ${statement}`;
+          }
+          statements.push(statement);
+        }
+      }
+    }
+
+    return {
+      playwrightCode: statements.join('\n'),
+      requiresAwait: true,
+      imports: Array.from(context.imports),
+      warnings: context.warnings.length > 0 ? context.warnings : undefined
+    };
+  }
+
+  /**
+   * Convert complex locator patterns (within, find, first, etc.)
+   */
+  private convertComplexLocatorPattern(cypressCommand: CypressCommand, context: ConversionContext): ConvertedCommand {
+    let currentLocator = this.getBaseLocator(cypressCommand, context);
+    const statements: string[] = [];
+    let requiresAwait = false;
+
+    for (const chainedCall of cypressCommand.chainedCalls!) {
+      switch (chainedCall.method) {
+        case 'within':
+          // within() in Cypress becomes a scoped locator in Playwright
+          break; // Current locator stays the same
+        case 'find':
+          const selector = chainedCall.args[0] as string;
+          currentLocator = `${currentLocator}.locator(${this.formatValue(selector)})`;
+          break;
+        case 'first':
+          currentLocator = `${currentLocator}.first()`;
+          break;
+        case 'last':
+          currentLocator = `${currentLocator}.last()`;
+          break;
+        case 'eq':
+          const index = chainedCall.args[0] as number;
+          currentLocator = `${currentLocator}.nth(${index})`;
+          break;
+        case 'filter':
+          const filterSelector = chainedCall.args[0] as string;
+          if (typeof filterSelector === 'string' && filterSelector.startsWith(':contains(')) {
+            const text = filterSelector.match(/:contains\(["']?([^"')]+)["']?\)/)?.[1];
+            if (text) {
+              currentLocator = `${currentLocator}.filter({ hasText: ${this.formatValue(text)} })`;
+            }
+          } else {
+            currentLocator = `${currentLocator}.filter({ has: page.locator(${this.formatValue(filterSelector)}) })`;
+          }
+          break;
+        case 'not':
+          const notSelector = chainedCall.args[0] as string;
+          currentLocator = `${currentLocator}.locator(':not(${notSelector})')`;
+          break;
+        case 'contains':
+          const text = chainedCall.args[0] as string;
+          currentLocator = `${currentLocator}.filter({ hasText: ${this.formatValue(text)} })`;
+          break;
+        case 'should':
+          // Handle assertion
+          const assertionKey = chainedCall.args[0] as string;
+          const assertionMapping = this.assertionMappings.get(assertionKey);
+          if (assertionMapping) {
+            let assertion: string;
+            if (assertionMapping.transformation) {
+              assertion = assertionMapping.transformation([currentLocator, ...chainedCall.args.slice(1)]);
+            } else {
+              const additionalArgs = chainedCall.args.slice(1);
+              const formattedArgs = additionalArgs.length > 0 ? this.formatArguments(additionalArgs) : '()';
+              assertion = `await expect(${currentLocator}).${assertionMapping.playwrightAssertion}${formattedArgs}`;
+            }
+            statements.push(assertion);
+            requiresAwait = true;
+          }
+          break;
+        default:
+          // Handle other chained calls
+          const converted = this.convertChainedCall(currentLocator, chainedCall, context);
+          if (converted.code.trim()) {
+            let statement = converted.code;
+            if (converted.requiresAwait) {
+              statement = `await ${statement}`;
+              requiresAwait = true;
+            }
+            statements.push(statement);
+          }
+      }
+    }
+
+    return {
+      playwrightCode: statements.join('\n'),
+      requiresAwait,
+      imports: Array.from(context.imports),
+      warnings: context.warnings.length > 0 ? context.warnings : undefined
+    };
+  }
+
+  /**
+   * Convert advanced interaction patterns
+   */
+  private convertAdvancedInteractionPattern(cypressCommand: CypressCommand, context: ConversionContext): ConvertedCommand {
+    const baseLocator = this.getBaseLocator(cypressCommand, context);
+    const statements: string[] = [];
+    let requiresAwait = false;
+
+    for (const chainedCall of cypressCommand.chainedCalls!) {
+      switch (chainedCall.method) {
+        case 'trigger':
+          const event = chainedCall.args[0] as string;
+          statements.push(`await ${baseLocator}.dispatchEvent('${event}')`);
+          requiresAwait = true;
+          break;
+        case 'drag':
+          const target = chainedCall.args[0] as string;
+          const targetLocator = this.optimizeSelector(target);
+          statements.push(`await ${baseLocator}.dragTo(${targetLocator})`);
+          requiresAwait = true;
+          break;
+        case 'selectFile':
+          const filePath = chainedCall.args[0] as string;
+          context.imports.add('path');
+          statements.push(`await ${baseLocator}.setInputFiles(path.join(__dirname, '${filePath}'))`);
+          requiresAwait = true;
+          break;
+        case 'invoke':
+          const method = chainedCall.args[0] as string;
+          const args = chainedCall.args.slice(1);
+          if (method === 'focus') {
+            statements.push(`await ${baseLocator}.focus()`);
+          } else if (method === 'click') {
+            statements.push(`await ${baseLocator}.click()`);
+          } else {
+            context.warnings.push(`invoke('${method}') may require manual conversion`);
+            statements.push(`// TODO: Handle invoke('${method}') - may need page.evaluate()`);
+          }
+          requiresAwait = true;
+          break;
+        case 'its':
+          const property = chainedCall.args[0] as string;
+          if (property === 'value') {
+            statements.push(`const value = await ${baseLocator}.inputValue()`);
+          } else if (property === 'text') {
+            statements.push(`const text = await ${baseLocator}.textContent()`);
+          } else {
+            context.warnings.push(`its('${property}') may require manual conversion`);
+            statements.push(`// TODO: Handle its('${property}') - may need page.evaluate()`);
+          }
+          requiresAwait = true;
+          break;
+        case 'then':
+          context.warnings.push('then() callback requires manual conversion to standard JavaScript');
+          statements.push('// TODO: Convert then() callback to standard JavaScript/TypeScript');
+          break;
+        default:
+          // Handle regular chained calls
+          const converted = this.convertChainedCall(baseLocator, chainedCall, context);
+          if (converted.code.trim()) {
+            let statement = converted.code;
+            if (converted.requiresAwait) {
+              statement = `await ${statement}`;
+              requiresAwait = true;
+            }
+            statements.push(statement);
+          }
+      }
+    }
+
+    return {
+      playwrightCode: statements.join('\n'),
+      requiresAwait,
+      imports: Array.from(context.imports),
+      warnings: context.warnings.length > 0 ? context.warnings : undefined
+    };
+  }
+
+  /**
+   * Convert storage operation patterns
+   */
+  private convertStorageOperationPattern(cypressCommand: CypressCommand, context: ConversionContext): ConvertedCommand {
+    const statements: string[] = [];
+    let requiresAwait = true;
+
+    for (const chainedCall of cypressCommand.chainedCalls!) {
+      if (chainedCall.method === 'its') {
+        const storageType = chainedCall.args[0] as string;
+
+        if (storageType === 'localStorage' || storageType === 'sessionStorage') {
+          // Look for subsequent invoke calls
+          const nextCall = cypressCommand.chainedCalls![cypressCommand.chainedCalls!.indexOf(chainedCall) + 1];
+          if (nextCall && nextCall.method === 'invoke') {
+            const operation = nextCall.args[0] as string;
+            const key = nextCall.args[1] as string;
+            const value = nextCall.args[2];
+
+            switch (operation) {
+              case 'setItem':
+                statements.push(`await page.evaluate(() => {`);
+                statements.push(`  ${storageType}.setItem(${this.formatValue(key)}, ${this.formatValue(value)})`);
+                statements.push(`})`);
+                break;
+              case 'getItem':
+                statements.push(`const value = await page.evaluate(() => {`);
+                statements.push(`  return ${storageType}.getItem(${this.formatValue(key)})`);
+                statements.push(`})`);
+                break;
+              case 'removeItem':
+                statements.push(`await page.evaluate(() => {`);
+                statements.push(`  ${storageType}.removeItem(${this.formatValue(key)})`);
+                statements.push(`})`);
+                break;
+              case 'clear':
+                statements.push(`await page.evaluate(() => {`);
+                statements.push(`  ${storageType}.clear()`);
+                statements.push(`})`);
+                break;
+              default:
+                context.warnings.push(`${storageType}.${operation}() may require manual conversion`);
+                statements.push(`// TODO: Handle ${storageType}.${operation}()`);
+            }
+          }
+        }
+      }
+    }
+
+    if (statements.length === 0) {
+      statements.push('// TODO: Convert window operation');
+    }
+
+    return {
+      playwrightCode: statements.join('\n'),
+      requiresAwait,
+      imports: Array.from(context.imports),
+      warnings: context.warnings.length > 0 ? context.warnings : undefined
+    };
+  }
+
+  // Helper methods for pattern detection
+  private hasMultipleAssertions(cypressCommand: CypressCommand): boolean {
+    return cypressCommand.chainedCalls!.filter(call => call.method === 'should' || call.method === 'and').length > 1;
+  }
+
+  private hasComplexLocators(cypressCommand: CypressCommand): boolean {
+    return cypressCommand.chainedCalls!.some(call =>
+      ['within', 'find', 'first', 'last', 'eq', 'filter', 'not', 'contains'].includes(call.method)
+    );
+  }
+
+  private hasAdvancedInteractions(cypressCommand: CypressCommand): boolean {
+    return cypressCommand.chainedCalls!.some(call =>
+      ['trigger', 'drag', 'selectFile', 'invoke', 'its', 'then'].includes(call.method)
+    );
+  }
+
+  private hasStorageOperations(cypressCommand: CypressCommand): boolean {
+    return cypressCommand.command === 'window' && cypressCommand.chainedCalls!.some(call =>
+      call.method === 'its' && (call.args[0] === 'localStorage' || call.args[0] === 'sessionStorage')
+    );
+  }
+
+  /**
+   * Generate a descriptive variable name for elements
+   */
+  private generateElementVariableName(cypressCommand: CypressCommand): string {
+    const selector = cypressCommand.args[0] as string;
+
+    // Extract testid
+    const testIdMatch = selector.match(/\[data-testid=["']([^"']+)["']\]/);
+    if (testIdMatch) {
+      return testIdMatch[1].replace(/-/g, '').toLowerCase() + 'Element';
+    }
+
+    // Extract role
+    const roleMatch = selector.match(/\[role=["']([^"']+)["']\]/);
+    if (roleMatch) {
+      return roleMatch[1].toLowerCase() + 'Element';
+    }
+
+    // Generic element name
+    return 'element';
   }
 
   /**
@@ -300,10 +726,27 @@ export class CommandConverter {
         return { code: `${baseLocator}.focus()`, requiresAwait: true };
       case 'blur':
         return { code: `${baseLocator}.blur()`, requiresAwait: true };
+      case 'find':
+        const selector = chainedCall.args[0] as string;
+        return { code: `${baseLocator}.locator(${this.formatValue(selector)})`, requiresAwait: false };
+      case 'first':
+        return { code: `${baseLocator}.first()`, requiresAwait: false };
+      case 'last':
+        return { code: `${baseLocator}.last()`, requiresAwait: false };
+      case 'eq':
+        const index = chainedCall.args[0] as number;
+        return { code: `${baseLocator}.nth(${index})`, requiresAwait: false };
       case 'as':
         // Cypress aliases are not needed in Playwright in the same way
         context.warnings.push(`Cypress alias '${chainedCall.args[0]}' converted - consider storing in variable instead`);
         return { code: '', requiresAwait: false };
+      case 'tab':
+        return { code: `${baseLocator}.press('Tab')`, requiresAwait: true };
+      case 'wait':
+        if (chainedCall.args.length > 0 && typeof chainedCall.args[0] === 'number') {
+          return { code: `page.waitForTimeout(${chainedCall.args[0]})`, requiresAwait: true };
+        }
+        return { code: `${baseLocator}./* TODO: wait */`, requiresAwait: false };
       default:
         context.warnings.push(`Unknown chained method: ${chainedCall.method}`);
         return { code: `${baseLocator}./* TODO: ${chainedCall.method} */`, requiresAwait: false };
@@ -350,6 +793,14 @@ export class CommandConverter {
                        selector.match(/\[data-testid=([^[\]]+)\]/);
     if (testIdMatch) {
       const value = testIdMatch[1].replace(/['"]/g, '');
+      return `page.getByTestId('${value}')`;
+    }
+
+    // Handle data-cy (Cypress convention)
+    const cyMatch = selector.match(/\[data-cy=["']([^"']+)["']\]/) ||
+                   selector.match(/\[data-cy=([^[\]]+)\]/);
+    if (cyMatch) {
+      const value = cyMatch[1].replace(/['"]/g, '');
       return `page.getByTestId('${value}')`;
     }
 
@@ -471,6 +922,14 @@ export class CommandConverter {
             return `page.getByTestId('${value}')`;
           }
 
+          // Handle data-cy (Cypress convention)
+          const cyMatch = selector.match(/\[data-cy=["']([^"']+)["']\]/) ||
+                         selector.match(/\[data-cy=([^[\]]+)\]/);
+          if (cyMatch) {
+            const value = cyMatch[1].replace(/['"]/g, '');
+            return `page.getByTestId('${value}')`;
+          }
+
           // Handle role
           const roleMatch = selector.match(/\[role=["']([^"']+)["']\]/) ||
                            selector.match(/\[role=([^[\]]+)\]/);
@@ -526,7 +985,45 @@ export class CommandConverter {
         transformation: (args: any[]) => {
           const method = args[0];
           const url = args[1];
-          return `page.route('${url}', route => route.continue())`;
+          const response = args[2];
+
+          if (response && typeof response === 'object' && response.fixture) {
+            return `page.route('**${url}', async route => {
+  const json = JSON.parse(await fs.readFile(path.join(__dirname, '../fixtures/${response.fixture}'), 'utf-8'));
+  await route.fulfill({ json });
+})`;
+          }
+
+          return `page.route('**${url}', route => route.continue())`;
+        }
+      }],
+      ['viewport', {
+        cypressCommand: 'viewport',
+        playwrightEquivalent: 'page.setViewportSize',
+        requiresAwait: true,
+        transformation: (args: any[]) => {
+          const width = args[0];
+          const height = args[1];
+          return `page.setViewportSize({ width: ${width}, height: ${height} })`;
+        }
+      }],
+      ['setCookie', {
+        cypressCommand: 'setCookie',
+        playwrightEquivalent: 'page.context().addCookies',
+        requiresAwait: true,
+        transformation: (args: any[]) => {
+          const name = args[0];
+          const value = args[1];
+          return `page.context().addCookies([{ name: '${name}', value: '${value}', url: page.url() }])`;
+        }
+      }],
+      ['fixture', {
+        cypressCommand: 'fixture',
+        playwrightEquivalent: 'fs.readFile',
+        requiresAwait: true,
+        transformation: (args: any[]) => {
+          const filename = args[0];
+          return `const ${filename.replace(/\./g, '').replace(/\//g, '')} = JSON.parse(await fs.readFile(path.join(__dirname, '../fixtures/${filename}'), 'utf-8'))`;
         }
       }]
     ]);
@@ -582,6 +1079,73 @@ export class CommandConverter {
           const formattedValue = typeof value === 'string' ? `'${value}'` : String(value);
           return `await expect(${baseLocator}).toContainText(${formattedValue})`;
         }
+      }],
+      ['contain', {
+        cypressAssertion: 'contain',
+        playwrightAssertion: 'toContainText'
+      }],
+      ['have.class', {
+        cypressAssertion: 'have.class',
+        playwrightAssertion: 'toHaveClass',
+        transformation: (args: any[]) => {
+          const baseLocator = args[0];
+          const className = args[1];
+          return `await expect(${baseLocator}).toHaveClass(/${className}/)`;
+        }
+      }],
+      ['not.have.class', {
+        cypressAssertion: 'not.have.class',
+        playwrightAssertion: 'not.toHaveClass',
+        transformation: (args: any[]) => {
+          const baseLocator = args[0];
+          const className = args[1];
+          return `await expect(${baseLocator}).not.toHaveClass(/${className}/)`;
+        }
+      }],
+      ['have.attr', {
+        cypressAssertion: 'have.attr',
+        playwrightAssertion: 'toHaveAttribute'
+      }],
+      ['have.property', {
+        cypressAssertion: 'have.property',
+        playwrightAssertion: 'toHaveProperty',
+        transformation: (args: any[]) => {
+          const baseLocator = args[0];
+          const property = args[1];
+          const value = args[2];
+          if (value !== undefined) {
+            return `expect(${baseLocator}).toHaveProperty('${property}', ${typeof value === 'string' ? `'${value}'` : value})`;
+          }
+          return `expect(${baseLocator}).toHaveProperty('${property}')`;
+        }
+      }],
+      ['not.exist', {
+        cypressAssertion: 'not.exist',
+        playwrightAssertion: 'not.toBeVisible'
+      }],
+      ['exist', {
+        cypressAssertion: 'exist',
+        playwrightAssertion: 'toBeVisible'
+      }],
+      ['equal', {
+        cypressAssertion: 'equal',
+        playwrightAssertion: 'toBe'
+      }],
+      ['eq', {
+        cypressAssertion: 'eq',
+        playwrightAssertion: 'toBe'
+      }],
+      ['have.focus', {
+        cypressAssertion: 'have.focus',
+        playwrightAssertion: 'toBeFocused'
+      }],
+      ['not.have.focus', {
+        cypressAssertion: 'not.have.focus',
+        playwrightAssertion: 'not.toBeFocused'
+      }],
+      ['not.be.visible', {
+        cypressAssertion: 'not.be.visible',
+        playwrightAssertion: 'not.toBeVisible'
       }]
     ]);
   }
