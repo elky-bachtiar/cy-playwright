@@ -3,10 +3,10 @@
 ## Tasks
 
 - [ ] 0. GitHub Repository Conversion Enhancement
-  - [ ] 0.1 Enhance CLI to support --github-url option for direct GitHub repository conversion
+  - [ ] 0.1 Enhance CLI to support --gitlab-url option for direct Gitlab repository conversion
   - [ ] 0.2 Implement full repository cloning to .conversion directory instead of temporary locations
   - [ ] 0.3 Modify conversion workflow to run within the cloned project directory
-  - [ ] 0.4 Update CLI command structure to handle: `cypress-to-playwright-converter --github-url <url> --output ./converted-project`
+  - [ ] 0.4 Update CLI command structure to handle: `cypress-to-playwright-converter --gitlab-url <url> --output ./converted-project`
   - [ ] 0.5 Ensure converted Playwright project is created within the cloned repository directory
   - [ ] 0.6 Add cleanup options for temporary cloned repositories
   - [ ] 0.7 Update repository integration service to support in-project conversion workflow

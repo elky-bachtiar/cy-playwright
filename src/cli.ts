@@ -60,21 +60,21 @@ export class CLI {
       });
 
     this.program
-      .option('--github-url <url>', 'GitHub repository URL to clone and convert')
+      .command('convert-github')
+      .description('Clone and convert Cypress project from GitHub repository')
+      .requiredOption('--github-url <url>', 'GitHub repository URL to clone and convert')
       .option('-o, --output <path>', 'Output directory for converted Playwright project', './playwright-project')
       .option('--preserve-structure', 'Preserve original directory structure', false)
       .option('--generate-page-objects', 'Generate page object models from custom commands', true)
       .option('-v, --verbose', 'Enable verbose logging', false)
       .action(async (options) => {
-        if (options.githubUrl) {
-          await this.handleGitHubConversion({
-            githubUrl: options.githubUrl,
-            outputDir: options.output,
-            preserveStructure: options.preserveStructure,
-            generatePageObjects: options.generatePageObjects,
-            verbose: options.verbose
-          });
-        }
+        await this.handleGitHubConversion({
+          githubUrl: options.githubUrl,
+          outputDir: options.output,
+          preserveStructure: options.preserveStructure,
+          generatePageObjects: options.generatePageObjects,
+          verbose: options.verbose
+        });
       });
   }
 
@@ -386,7 +386,7 @@ export class CLI {
 
     console.log(`\n🔍 Found ${projects.length} potential Cypress projects:`);
 
-    const choices = projects.map((project, index) => {
+    const choices: Array<{name: string; value: string | null; short: string}> = projects.map((project, index) => {
       const configIndicator = project.configFile ? '📄' : '❌';
       const confidenceIndicator = {
         high: '🟢',
@@ -403,7 +403,7 @@ export class CLI {
 
     choices.push({
       name: '❌ Cancel conversion',
-      value: null,
+      value: '__CANCEL__',
       short: 'Cancel'
     });
 
@@ -417,7 +417,105 @@ export class CLI {
       }
     ]);
 
-    return answer.selectedProject;
+    return answer.selectedProject === '__CANCEL__' ? null : answer.selectedProject;
+  }
+
+  private async selectBranch(repositoryPath: string): Promise<string | null> {
+    const simpleGit = require('simple-git');
+    const git = simpleGit(repositoryPath);
+
+    try {
+      // Get all branches (local and remote)
+      const branchSummary = await git.branch(['-a']);
+
+      // Filter and format branch names
+      const branches = Object.keys(branchSummary.branches)
+        .filter(branch =>
+          !branch.includes('HEAD') &&
+          branch !== branchSummary.current
+        )
+        .map(branch => {
+          // Clean up remote branch names
+          const cleanName = branch.replace('remotes/origin/', '');
+          return {
+            name: cleanName,
+            isCurrent: branch === branchSummary.current,
+            isRemote: branch.includes('remotes/')
+          };
+        })
+        .filter((branch, index, self) =>
+          // Remove duplicates (local and remote versions of same branch)
+          self.findIndex(b => b.name === branch.name) === index
+        )
+        .sort((a, b) => {
+          // Sort with current branch first, then alphabetically
+          if (a.isCurrent) return -1;
+          if (b.isCurrent) return 1;
+          return a.name.localeCompare(b.name);
+        });
+
+      // Add current branch to the list if not already there
+      const currentBranch = branchSummary.current;
+      if (currentBranch && !branches.find(b => b.name === currentBranch)) {
+        branches.unshift({
+          name: currentBranch,
+          isCurrent: true,
+          isRemote: false
+        });
+      }
+
+      if (branches.length <= 1) {
+        console.log(`📍 Using branch: ${currentBranch || 'main'}`);
+        return currentBranch || 'main';
+      }
+
+      console.log(`\n🌿 Found ${branches.length} available branches:`);
+
+      const choices = branches.map(branch => ({
+        name: `${branch.isCurrent ? '➤ ' : '  '}${branch.name}${branch.isCurrent ? ' (current)' : ''}`,
+        value: branch.name,
+        short: branch.name
+      }));
+
+      choices.push({
+        name: '❌ Cancel conversion',
+        value: '__CANCEL__',
+        short: 'Cancel'
+      });
+
+      const answer = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'selectedBranch',
+          message: 'Select a branch to work with:',
+          choices,
+          pageSize: 10
+        }
+      ]);
+
+      if (answer.selectedBranch === '__CANCEL__') {
+        return null;
+      }
+
+      // Switch to selected branch if it's different from current
+      if (answer.selectedBranch !== currentBranch) {
+        console.log(`🔄 Switching to branch: ${answer.selectedBranch}`);
+        await git.checkout(answer.selectedBranch);
+        console.log(`✅ Switched to branch: ${answer.selectedBranch}`);
+      }
+
+      return answer.selectedBranch;
+
+    } catch (error) {
+      console.error('❌ Error fetching branches:', error instanceof Error ? error.message : String(error));
+      // Fallback to current branch
+      try {
+        const currentBranch = await git.revparse(['--abbrev-ref', 'HEAD']);
+        return currentBranch.trim();
+      } catch {
+        return 'main'; // Ultimate fallback
+      }
+    }
   }
 
   private async handleConversion(options: ConversionOptions): Promise<void> {
@@ -630,9 +728,8 @@ export class CLI {
       console.log(`📥 Cloning repository to: ${clonedPath}`);
 
       const cloneResult = await this.githubRepo.cloneRepository(options.githubUrl, clonedPath, {
-        branch: repoInfo.branch,
         clean: true,
-        depth: 1,
+        depth: 0, // Full clone to get all examples and branches
         retries: 2
       });
 
@@ -644,7 +741,15 @@ export class CLI {
 
       console.log('✅ Repository cloned successfully');
 
-      // Step 4: Scan for Cypress projects in the repository
+      // Step 4: Branch selection
+      console.log('🌿 Fetching available branches...');
+      const selectedBranch = await this.selectBranch(clonedPath);
+      if (!selectedBranch) {
+        console.log('❌ No branch selected. Conversion cancelled.');
+        process.exit(1);
+      }
+
+      // Step 5: Scan for Cypress projects in the repository
       console.log('🔍 Scanning for Cypress projects...');
       const scanResult = await this.scanForCypressProjects(clonedPath);
 
@@ -667,12 +772,10 @@ export class CLI {
       console.log('🔄 Starting conversion within selected project...');
       console.log(`📁 Converting: ${path.relative(clonedPath, selectedProjectPath) || '.'}`);;
 
-      // Create output directory within the selected project
-      const projectOutputDir = path.join(selectedProjectPath, options.outputDir);
-
+      // Convert in-place - place Playwright files alongside Cypress files
       await this.handleConversion({
         sourceDir: selectedProjectPath,
-        outputDir: projectOutputDir,
+        outputDir: selectedProjectPath, // Use same directory as source
         preserveStructure: options.preserveStructure,
         generatePageObjects: options.generatePageObjects,
         verbose: options.verbose
@@ -680,7 +783,7 @@ export class CLI {
 
       console.log(`\n🎉 GitHub repository conversion completed!`);
       console.log(`📁 Cloned repository: ${clonedPath}`);
-      console.log(`📁 Converted project: ${projectOutputDir}`);
+      console.log(`📁 Converted project: ${selectedProjectPath}`);
 
     } catch (error) {
       console.error('❌ GitHub conversion failed:', error);

@@ -28,7 +28,7 @@ describe('Multi-Platform CI Conversion', () => {
     jest.clearAllMocks();
 
     // Setup default fs.existsSync behavior
-    mockFs.existsSync.mockImplementation((filePath: string) => {
+    mockFs.existsSync.mockImplementation((filePath) => {
       const pathStr = filePath.toString();
       return pathStr.includes('.circleci') ||
              pathStr.includes('appveyor') ||
@@ -37,7 +37,7 @@ describe('Multi-Platform CI Conversion', () => {
     });
 
     // Setup default fs.readFileSync behavior
-    mockFs.readFileSync.mockImplementation((filePath: string) => {
+    mockFs.readFileSync.mockImplementation((filePath) => {
       const pathStr = filePath.toString();
       if (pathStr.includes('.circleci/config.yml')) {
         return mockCircleCIConfig;
@@ -51,9 +51,9 @@ describe('Multi-Platform CI Conversion', () => {
 
     // Setup default yaml.load behavior
     mockYaml.load.mockImplementation((content: string) => {
-      if (content.includes('circleci')) return mockParsedCircleCIConfig;
-      if (content.includes('appveyor')) return mockParsedAppVeyorConfig;
-      if (content.includes('azure')) return mockParsedAzurePipelinesConfig;
+      if (content.includes('cypress-io/cypress@3') || content.includes('cypress/run')) return mockParsedCircleCIConfig;
+      if (content.includes('version: 1.0.{build}') || content.includes('appveyor')) return mockParsedAppVeyorConfig;
+      if (content.includes('azure-pipelines') || content.includes('- task:')) return mockParsedAzurePipelinesConfig;
       return {};
     });
 
@@ -287,8 +287,8 @@ steps:
         mockParsedCircleCIConfig
       );
 
-      const chromeJob = convertedConfig.jobs['playwright-chrome'];
-      const firefoxJob = convertedConfig.jobs['playwright-firefox'];
+      const chromeJob = convertedConfig.jobs!['playwright-chrome'];
+      const firefoxJob = convertedConfig.jobs!['playwright-firefox'];
 
       expect(chromeJob.steps).toEqual(
         expect.arrayContaining([
@@ -312,7 +312,7 @@ steps:
         mockParsedCircleCIConfig
       );
 
-      expect(convertedConfig.workflows.build.jobs).toEqual(
+      expect(convertedConfig.workflows!.build.jobs).toEqual(
         expect.arrayContaining([
           'playwright-chrome',
           'playwright-firefox'
@@ -355,7 +355,7 @@ steps:
         mockParsedAppVeyorConfig
       );
 
-      expect(convertedConfig.environment.matrix).toEqual(
+      expect(convertedConfig.environment!.matrix).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ browser: 'chromium' }),
           expect.objectContaining({ browser: 'firefox' })
@@ -401,12 +401,12 @@ steps:
         mockParsedAzurePipelinesConfig
       );
 
-      const playwrightStep = convertedConfig.steps.find(step =>
+      const playwrightStep = convertedConfig.steps!.find(step =>
         step.script?.includes('npx playwright test')
       );
 
       expect(playwrightStep).toBeDefined();
-      expect(playwrightStep.displayName).toBe('Run Playwright tests');
+      expect(playwrightStep!.displayName).toBe('Run Playwright tests');
     });
 
     it('should convert strategy matrix for Azure Pipelines', async () => {
@@ -414,7 +414,7 @@ steps:
         mockParsedAzurePipelinesConfig
       );
 
-      expect(convertedConfig.strategy.matrix).toEqual({
+      expect(convertedConfig.strategy!.matrix).toEqual({
         chromium: { browser: 'chromium' },
         firefox: { browser: 'firefox' }
       });
@@ -425,12 +425,12 @@ steps:
         mockParsedAzurePipelinesConfig
       );
 
-      const installStep = convertedConfig.steps.find(step =>
+      const installStep = convertedConfig.steps!.find(step =>
         step.script?.includes('npx playwright install')
       );
 
       expect(installStep).toBeDefined();
-      expect(installStep.displayName).toBe('Install Playwright');
+      expect(installStep!.displayName).toBe('Install Playwright');
     });
 
     it('should convert test result publishing for Azure Pipelines', async () => {
@@ -438,12 +438,12 @@ steps:
         mockParsedAzurePipelinesConfig
       );
 
-      const publishStep = convertedConfig.steps.find(step =>
+      const publishStep = convertedConfig.steps!.find(step =>
         step.task === 'PublishTestResults@2'
       );
 
       expect(publishStep).toBeDefined();
-      expect(publishStep.inputs.testResultsFiles).toBe('test-results/results.xml');
+      expect(publishStep!.inputs!.testResultsFiles).toBe('test-results/results.xml');
     });
   });
 
@@ -502,7 +502,7 @@ steps:
 
       const convertedConfig = await ciConverter.convertCircleCIConfig(configWithEnv);
 
-      expect(convertedConfig.jobs['playwright-test'].environment).toEqual({
+      expect(convertedConfig.jobs!['playwright-test'].environment).toEqual({
         NODE_ENV: 'test',
         API_URL: 'https://api.example.com'
       });
@@ -532,11 +532,11 @@ steps:
         { addPlaywrightEnvVars: true }
       );
 
-      const playwrightStep = convertedConfig.steps.find(step =>
+      const playwrightStep = convertedConfig.steps!.find(step =>
         step.script?.includes('npx playwright test')
       );
 
-      expect(playwrightStep.env).toEqual(
+      expect(playwrightStep!.env).toEqual(
         expect.objectContaining({
           PLAYWRIGHT_HTML_REPORT: 'playwright-report',
           PLAYWRIGHT_JUNIT_OUTPUT_NAME: 'results.xml'

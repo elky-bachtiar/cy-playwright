@@ -1421,9 +1421,9 @@ export class CommandConverter {
    * Check if a string is likely a variable reference
    */
   private isVariableReference(value: string): boolean {
-    // Common variable patterns
+    // Only treat as variable if it contains dots, brackets, or function calls
+    // Don't treat simple alphanumeric strings as variables by default
     const variablePatterns = [
-      /^[a-zA-Z_$][a-zA-Z0-9_$]*$/, // Simple variable name
       /^[a-zA-Z_$][a-zA-Z0-9_$]*\.[a-zA-Z_$][a-zA-Z0-9_$]*/, // Object property access
       /^[a-zA-Z_$][a-zA-Z0-9_$]*\[[^\]]+\]/, // Array or object bracket notation
       /^this\.[a-zA-Z_$][a-zA-Z0-9_$]*/, // this references

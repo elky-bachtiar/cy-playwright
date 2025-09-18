@@ -280,29 +280,107 @@ export class MultiPlatformCIConverter {
       }
     }
 
-    // Update workflows to reference new job names
+    // Convert workflow orb jobs to actual job definitions and update workflows
     if (convertedConfig.workflows) {
       for (const workflow of Object.values(convertedConfig.workflows)) {
         if (workflow.jobs && Array.isArray(workflow.jobs)) {
-          workflow.jobs = workflow.jobs.map((job: any) => {
+          const newWorkflowJobs: any[] = [];
+
+          for (const job of workflow.jobs) {
             if (typeof job === 'string') {
-              return job.replace(/cypress/gi, 'playwright');
+              newWorkflowJobs.push(job.replace(/cypress/gi, 'playwright'));
             } else if (typeof job === 'object') {
-              const newJob: any = {};
-              for (const [key, value] of Object.entries(job)) {
-                const newKey = key.includes('cypress/') ?
-                  key.replace(/cypress/gi, 'playwright') : key;
-                newJob[newKey] = value;
+              // Handle orb-based jobs like 'cypress/run'
+              for (const [orbJob, jobConfig] of Object.entries(job)) {
+                if (orbJob.startsWith('cypress/')) {
+                  // Convert orb job to actual job definition
+                  const config = jobConfig as any;
+                  const jobName = config.name ? config.name.replace(/cypress/gi, 'playwright') : 'playwright-test';
+                  convertedConfig.jobs![jobName] = await this.convertOrbJobToJobDefinition(orbJob, config, options);
+                  newWorkflowJobs.push(jobName);
+                } else {
+                  // Regular job reference
+                  const newJob: any = {};
+                  const newKey = orbJob.includes('cypress') ? orbJob.replace(/cypress/gi, 'playwright') : orbJob;
+                  newJob[newKey] = jobConfig;
+                  newWorkflowJobs.push(newJob);
+                }
               }
-              return newJob;
+            } else {
+              newWorkflowJobs.push(job);
             }
-            return job;
-          });
+          }
+
+          workflow.jobs = newWorkflowJobs;
         }
       }
     }
 
     return convertedConfig;
+  }
+
+  /**
+   * Convert orb-based job to actual job definition
+   */
+  private async convertOrbJobToJobDefinition(orbJob: string, jobConfig: any, options: MultiPlatformConversionOptions): Promise<any> {
+    const convertedJob: any = {
+      docker: [{ image: 'mcr.microsoft.com/playwright:v1.40.0-focal' }],
+      steps: []
+    };
+
+    // Add checkout step
+    convertedJob.steps.push('checkout');
+
+    // Add Node.js setup if needed
+    convertedJob.steps.push({
+      name: 'Setup Node.js',
+      uses: 'actions/setup-node@v3',
+      with: { 'node-version': '18' }
+    });
+
+    // Install dependencies
+    convertedJob.steps.push({
+      name: 'Install dependencies',
+      run: 'npm ci'
+    });
+
+    // Install Playwright browsers
+    convertedJob.steps.push({
+      name: 'Install Playwright browsers',
+      run: 'npx playwright install --with-deps'
+    });
+
+    // Convert browser configuration
+    let browserProject = 'chromium';
+    if (jobConfig.browser) {
+      browserProject = jobConfig.browser === 'chrome' ? 'chromium' : jobConfig.browser;
+    }
+
+    // Add test execution step
+    convertedJob.steps.push({
+      name: 'Run Playwright tests',
+      run: `npx playwright test --project ${browserProject}`
+    });
+
+    // Add artifact upload if record is enabled
+    if (jobConfig.record) {
+      convertedJob.steps.push({
+        name: 'Upload test results',
+        uses: 'actions/upload-artifact@v3',
+        with: {
+          name: `playwright-results-${browserProject}`,
+          path: 'test-results/'
+        },
+        if: 'always()'
+      });
+    }
+
+    // Copy over any environment variables
+    if (jobConfig.environment) {
+      convertedJob.environment = this.convertEnvironmentVariables(jobConfig.environment, options);
+    }
+
+    return convertedJob;
   }
 
   /**

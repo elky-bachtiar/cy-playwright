@@ -59,7 +59,7 @@ export class GitHubRepository {
       return {
         owner: httpsMatch[1],
         repo: httpsMatch[2],
-        branch: httpsMatch[3] || 'main'
+        branch: httpsMatch[3] || 'master' // Default to master for better compatibility
       }
     }
 
@@ -69,7 +69,7 @@ export class GitHubRepository {
       return {
         owner: sshMatch[1],
         repo: sshMatch[2],
-        branch: 'main'
+        branch: 'master' // Default to master for better compatibility
       }
     }
 
@@ -214,7 +214,10 @@ export class GitHubRepository {
     // Attempt clone with retries
     for (let attempt = 0; attempt <= retries; attempt++) {
       try {
-        const cloneOptions = ['--depth', String(depth)]
+        const cloneOptions: string[] = []
+        if (depth > 0) {
+          cloneOptions.push('--depth', String(depth))
+        }
         if (branch) {
           cloneOptions.push('--branch', branch)
         }
