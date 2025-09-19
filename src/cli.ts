@@ -571,6 +571,58 @@ export class CLI {
     }
   }
 
+  private async handleConversionEnhanced(options: ConversionOptions): Promise<void> {
+    console.log('🚀 Starting Enhanced Cypress to Playwright conversion...');
+    console.log(`Source: ${options.sourceDir}`);
+    console.log(`Output: ${options.outputDir}`);
+
+    try {
+      const result = await this.enhancedConversionService.convertProject({
+        sourceDir: options.sourceDir,
+        outputDir: options.outputDir,
+        preserveMethodChaining: options.preserveMethodChaining,
+        convertPageObjects: options.generatePageObjects,
+        deduplicateImports: options.deduplicateImports,
+        transformImportPaths: options.transformImportPaths,
+        convertTestStructure: options.convertTestStructure,
+        verbose: options.verbose
+      });
+
+      console.log('\n🎉 Conversion completed successfully!');
+      console.log('📊 Conversion Summary:');
+      console.log(`  - Total test files: ${result.summary.totalFiles}`);
+      console.log(`  - Successfully converted: ${result.summary.convertedFiles}`);
+      console.log(`  - Page objects generated: ${result.summary.pageObjectFiles}`);
+      console.log(`  - Configuration files: 0`);
+      console.log(`  - Conversion rate: ${result.summary.conversionRate.toFixed(1)}%`);
+
+      if (result.summary.warnings.length > 0) {
+        console.log('\n⚠️  Conversion warnings:');
+        result.summary.warnings.forEach(warning => console.log(`  - ${warning}`));
+      }
+
+      if (result.summary.errors.length > 0) {
+        console.log('\n❌ Conversion errors:');
+        result.summary.errors.forEach(error => console.log(`  - ${error}`));
+      }
+
+      console.log('\n📋 Next steps:');
+      console.log('  - Run `npm install` to install Playwright dependencies');
+      console.log('  - Run `npx playwright test` to execute converted tests');
+      console.log('  - Update any remaining test-specific configurations');
+
+      console.log(`\n📁 Generated files in ${options.outputDir}:`);
+      for (const file of result.convertedFiles) {
+        const relativeOutputPath = file.convertedPath.replace(options.outputDir + '/', '');
+        console.log(`  - ${relativeOutputPath}`);
+      }
+
+    } catch (error) {
+      console.error('❌ Enhanced conversion failed:', error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    }
+  }
+
   private async handleConversion(options: ConversionOptions): Promise<void> {
     console.log('🚀 Starting Cypress to Playwright conversion...');
     console.log(`Source: ${options.sourceDir}`);
