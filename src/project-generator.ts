@@ -320,6 +320,13 @@ export class ProjectGenerator {
     const indentStr = '  '.repeat(indent);
     let content = `${indentStr}test.describe('${describe.name}', () => {\n`;
 
+    // ✅ Generate hooks (beforeEach, before, afterEach, after) with enhanced page navigation
+    if (describe.hooks && describe.hooks.length > 0) {
+      for (const hook of describe.hooks) {
+        content += this.generateHook(hook, indentStr, cypressTestFile);
+      }
+    }
+
     // Generate nested describes
     if (describe.describes) {
       for (const nestedDescribe of describe.describes) {
@@ -355,6 +362,46 @@ export class ProjectGenerator {
     }
 
     content += `${indentStr}});\n\n`;
+    return content;
+  }
+
+  /**
+   * Generate Playwright hook from Cypress hook with enhanced page navigation
+   */
+  private generateHook(hook: any, indentStr: string, cypressTestFile: CypressTestFile): string {
+    let content = '';
+    const hookMapping: { [key: string]: string } = {
+      'beforeEach': 'test.beforeEach',
+      'before': 'test.beforeAll',
+      'afterEach': 'test.afterEach',
+      'after': 'test.afterAll'
+    };
+
+    const playwrightHook = hookMapping[hook.type] || hook.type;
+    content += `${indentStr}  ${playwrightHook}(async ({ page }) => {\n`;
+
+    for (const command of hook.commands) {
+      const converted = this.commandConverter.convertCommand(command);
+
+      if (converted.playwrightCode) {
+        // ✅ Enhanced page navigation handling for hooks
+        if (command.command === 'visit') {
+          // Add common page setup for navigation in hooks
+          content += `${indentStr}    // Navigate to page (converted from cy.visit)\n`;
+          content += `${indentStr}    ${converted.playwrightCode}\n`;
+
+          // Add common wait for page to be ready
+          if (hook.type === 'beforeEach') {
+            content += `${indentStr}    // Wait for page to be fully loaded\n`;
+            content += `${indentStr}    await page.waitForLoadState('networkidle');\n`;
+          }
+        } else {
+          content += `${indentStr}    ${converted.playwrightCode}\n`;
+        }
+      }
+    }
+
+    content += `${indentStr}  });\n\n`;
     return content;
   }
 

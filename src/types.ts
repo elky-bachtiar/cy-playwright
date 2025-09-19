@@ -31,19 +31,63 @@ export interface ConversionOptions {
   outputDir: string;
   preserveStructure?: boolean;
   generatePageObjects?: boolean;
+  migrateFixtures?: boolean;
+  convertConfiguration?: boolean;
+  updateDependencies?: boolean;
+  targetBrowsers?: string[];
   verbose?: boolean;
+}
+
+export interface GitHubProjectContext {
+  projectPath: string;
+  projectAnalysis: any; // ProjectAnalysis from cypress-project-detector
+  repositoryInfo: {
+    owner: string;
+    repo: string;
+    branch: string;
+  };
+  advancedFeatures: {
+    hasCustomSelectors: boolean;
+    hasCustomCommands: boolean;
+    hasCiCdConfig: boolean;
+    hasDockerConfig: boolean;
+    hasViewportConfig: boolean;
+    hasMobileTestVariants: boolean;
+  };
+}
+
+export interface ConfigurationMigrationResult {
+  playwrightConfig: any;
+  warnings: string[];
+  unmappedSettings: string[];
+  environmentVariables: string[];
+}
+
+export interface PackageJsonTransformation {
+  scripts: Record<string, string>;
+  dependencies: Record<string, string>;
+  devDependencies: Record<string, string>;
+  removedDependencies: string[];
+  addedDependencies: string[];
+  warnings: string[];
 }
 
 export interface CypressCommand {
   command: string;
-  args: (string | number | boolean)[];
+  args: any[];
   chainedCalls?: ChainedCall[];
   lineNumber?: number;
 }
 
 export interface ChainedCall {
   method: string;
-  args: (string | number | boolean)[];
+  args: any[];
+}
+
+export interface CypressHook {
+  type: 'beforeEach' | 'before' | 'afterEach' | 'after';
+  commands: CypressCommand[];
+  lineNumber?: number;
 }
 
 export interface CypressTest {
@@ -56,6 +100,7 @@ export interface CypressDescribe {
   name: string;
   tests: CypressTest[];
   describes?: CypressDescribe[];
+  hooks?: CypressHook[];
   lineNumber?: number;
 }
 
