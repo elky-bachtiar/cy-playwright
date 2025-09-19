@@ -31,6 +31,10 @@ export interface ConversionOptions {
   outputDir: string;
   preserveStructure?: boolean;
   generatePageObjects?: boolean;
+  preserveMethodChaining?: boolean;
+  deduplicateImports?: boolean;
+  transformImportPaths?: boolean;
+  convertTestStructure?: boolean;
   migrateFixtures?: boolean;
   convertConfiguration?: boolean;
   updateDependencies?: boolean;

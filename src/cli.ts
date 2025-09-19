@@ -63,11 +63,15 @@ export class CLI {
       .option('--convert-test-structure', 'Convert describe/context blocks to Playwright test.describe', true)
       .option('-v, --verbose', 'Enable verbose logging', false)
       .action(async (options) => {
-        await this.handleConversion({
+        await this.handleConversionEnhanced({
           sourceDir: options.source,
           outputDir: options.output,
           preserveStructure: options.preserveStructure,
           generatePageObjects: options.generatePageObjects,
+          preserveMethodChaining: options.preserveMethodChaining,
+          deduplicateImports: options.deduplicateImports,
+          transformImportPaths: options.transformImportPaths,
+          convertTestStructure: options.convertTestStructure,
           verbose: options.verbose
         });
       });
