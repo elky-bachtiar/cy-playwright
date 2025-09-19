@@ -4,7 +4,7 @@ export { RepositoryInfo, AccessValidation, CloneOptions, CloneResult }
 
 export class GitHubRepository extends BaseRepository {
   protected getDefaultBranch(): string {
-    return 'master' // GitHub traditionally uses master as default
+    return 'main' // GitHub now uses main as default, but will detect actual default
   }
 
   /**

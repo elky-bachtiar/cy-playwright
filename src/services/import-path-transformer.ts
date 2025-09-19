@@ -1,405 +1,256 @@
 import * as path from 'path';
+import { Logger } from '../utils/logger';
+import { ImportInfo } from './import-analyzer';
 
-export interface PathTransformationResult {
-  content: string;
-  transformedPaths: Array<{
-    original: string;
-    transformed: string;
-    reason: string;
-  }>;
-  warnings: string[];
+export interface PathMapping {
+  [originalPath: string]: string;
 }
 
-export interface PathTransformationOptions {
-  sourceDir?: string;
-  outputDir?: string;
-  preserveStructure?: boolean;
-  updatePageObjectPaths?: boolean;
+export interface OutputStructure {
+  testsDir: string;
+  pagesDir: string;
+  utilsDir?: string;
+  servicesDir?: string;
+}
+
+export interface PathNormalizationResult {
+  originalPath: string;
+  normalizedPath: string;
+  changed: boolean;
+  reason?: string;
 }
 
 export class ImportPathTransformer {
+  private logger = new Logger('ImportPathTransformer');
 
-  /**
-   * Transform import paths from Cypress to Playwright project structure
-   */
-  transformImportPaths(
-    content: string,
-    filePath: string,
-    options: PathTransformationOptions = {}
-  ): PathTransformationResult {
-    const transformedPaths: Array<{ original: string; transformed: string; reason: string }> = [];
-    const warnings: string[] = [];
+  // External libraries that should never be modified
+  private readonly externalLibraries = [
+    '@playwright/test',
+    '@angular/',
+    'wiremock-rest-client',
+    '@sta/wiremock-generator-ts',
+    'react',
+    'lodash',
+    'fs-extra',
+    'typescript'
+  ];
 
-    const {
-      sourceDir = 'cypress',
-      outputDir = 'tests',
-      preserveStructure = true,
-      updatePageObjectPaths = true
-    } = options;
-
-    let transformedContent = content;
-
-    // Transform import statements
-    transformedContent = this.transformImportStatements(
-      transformedContent,
-      filePath,
-      options,
-      transformedPaths,
-      warnings
-    );
-
-    // Transform dynamic imports and require statements
-    transformedContent = this.transformDynamicImports(
-      transformedContent,
-      filePath,
-      options,
-      transformedPaths,
-      warnings
-    );
-
-    return {
-      content: transformedContent,
-      transformedPaths,
-      warnings
-    };
-  }
-
-  /**
-   * Transform static import statements
-   */
-  private transformImportStatements(
-    content: string,
-    filePath: string,
-    options: PathTransformationOptions,
-    transformedPaths: Array<{ original: string; transformed: string; reason: string }>,
-    warnings: string[]
-  ): string {
-    const importRegex = /import\s+(.+?)\s+from\s+['"](.*?)['"];?/g;
-
-    return content.replace(importRegex, (match, importClause, importPath) => {
-      if (this.shouldTransformPath(importPath)) {
-        const transformedPath = this.transformSinglePath(importPath, filePath, options, warnings);
-
-        if (transformedPath !== importPath) {
-          transformedPaths.push({
-            original: importPath,
-            transformed: transformedPath,
-            reason: this.getTransformationReason(importPath, transformedPath)
-          });
-        }
-
-        return `import ${importClause} from '${transformedPath}';`;
-      }
-
-      return match;
-    });
-  }
-
-  /**
-   * Transform dynamic imports and require statements
-   */
-  private transformDynamicImports(
-    content: string,
-    filePath: string,
-    options: PathTransformationOptions,
-    transformedPaths: Array<{ original: string; transformed: string; reason: string }>,
-    warnings: string[]
-  ): string {
-    // Transform require() statements
-    content = content.replace(/require\s*\(\s*['"](.*?)['"]\s*\)/g, (match, requirePath) => {
-      if (this.shouldTransformPath(requirePath)) {
-        const transformedPath = this.transformSinglePath(requirePath, filePath, options, warnings);
-
-        if (transformedPath !== requirePath) {
-          transformedPaths.push({
-            original: requirePath,
-            transformed: transformedPath,
-            reason: this.getTransformationReason(requirePath, transformedPath)
-          });
-        }
-
-        return `require('${transformedPath}')`;
-      }
-
-      return match;
-    });
-
-    // Transform dynamic import() statements
-    content = content.replace(/import\s*\(\s*['"](.*?)['"]\s*\)/g, (match, importPath) => {
-      if (this.shouldTransformPath(importPath)) {
-        const transformedPath = this.transformSinglePath(importPath, filePath, options, warnings);
-
-        if (transformedPath !== importPath) {
-          transformedPaths.push({
-            original: importPath,
-            transformed: transformedPath,
-            reason: this.getTransformationReason(importPath, transformedPath)
-          });
-        }
-
-        return `import('${transformedPath}')`;
-      }
-
-      return match;
-    });
-
-    return content;
-  }
-
-  /**
-   * Check if a path should be transformed
-   */
-  private shouldTransformPath(importPath: string): boolean {
-    // Don't transform absolute paths or npm packages
-    if (!importPath.startsWith('./') && !importPath.startsWith('../')) {
-      return false;
-    }
-
-    // Don't transform already correct paths
-    if (importPath.includes('/tests/') || importPath.includes('/playwright/')) {
-      return false;
-    }
-
-    return true;
-  }
-
-  /**
-   * Transform a single import path
-   */
-  private transformSinglePath(
-    importPath: string,
-    currentFilePath: string,
-    options: PathTransformationOptions,
-    warnings: string[]
-  ): string {
-    const { sourceDir = 'cypress', outputDir = 'tests' } = options;
-
-    let transformedPath = importPath;
-
-    // Handle page object imports
-    if (this.isPageObjectImport(importPath)) {
-      transformedPath = this.transformPageObjectPath(importPath, options);
-    }
-    // Handle fixture imports
-    else if (this.isFixtureImport(importPath)) {
-      transformedPath = this.transformFixturePath(importPath, options);
-    }
-    // Handle support file imports
-    else if (this.isSupportFileImport(importPath)) {
-      transformedPath = this.transformSupportFilePath(importPath, options);
-    }
-    // Handle test file imports
-    else if (this.isTestFileImport(importPath)) {
-      transformedPath = this.transformTestFilePath(importPath, options);
-    }
-    // Handle general cypress path conversion
-    else if (importPath.includes(sourceDir)) {
-      transformedPath = this.transformCypressPath(importPath, sourceDir, outputDir);
-    }
-    // Handle deep relative paths (../../../)
-    else if (this.isDeepRelativePath(importPath)) {
-      transformedPath = this.normalizeDeepRelativePath(importPath, currentFilePath, options, warnings);
-    }
-
-    return transformedPath;
-  }
-
-  /**
-   * Check if import is for a page object
-   */
-  private isPageObjectImport(importPath: string): boolean {
-    return importPath.includes('/pages/') ||
-           importPath.includes('/page-objects/') ||
-           importPath.endsWith('Page') ||
-           importPath.includes('Page.');
-  }
-
-  /**
-   * Transform page object import path
-   */
-  private transformPageObjectPath(importPath: string, options: PathTransformationOptions): string {
-    const { outputDir = 'tests' } = options;
-
-    // Convert cypress/pages to tests/pages
-    let transformed = importPath
-      .replace(/cypress\/pages/g, `${outputDir}/pages`)
-      .replace(/cypress\/page-objects/g, `${outputDir}/page-objects`)
-      .replace(/cypress\/support\/pages/g, `${outputDir}/support/pages`)
-      .replace(/cypress\/support\/page-objects/g, `${outputDir}/support/page-objects`);
-
-    // Handle relative path adjustments
-    if (importPath.startsWith('../') && !transformed.startsWith('../')) {
-      // Adjust relative depth if needed
-      const currentDepth = (importPath.match(/\.\.\//g) || []).length;
-      if (currentDepth > 1) {
-        const adjustment = '../'.repeat(currentDepth - 1);
-        transformed = adjustment + transformed;
-      }
-    }
-
-    return transformed;
-  }
-
-  /**
-   * Check if import is for a fixture
-   */
-  private isFixtureImport(importPath: string): boolean {
-    return importPath.includes('/fixtures/') ||
-           importPath.includes('fixture');
-  }
-
-  /**
-   * Transform fixture import path
-   */
-  private transformFixturePath(importPath: string, options: PathTransformationOptions): string {
-    const { outputDir = 'tests' } = options;
-
-    return importPath
-      .replace(/cypress\/fixtures/g, `${outputDir}/fixtures`)
-      .replace(/cypress\/support\/fixtures/g, `${outputDir}/fixtures`);
-  }
-
-  /**
-   * Check if import is for a support file
-   */
-  private isSupportFileImport(importPath: string): boolean {
-    return importPath.includes('/support/') ||
-           importPath.includes('/commands/') ||
-           importPath.includes('/utilities/') ||
-           importPath.includes('/helpers/');
-  }
-
-  /**
-   * Transform support file import path
-   */
-  private transformSupportFilePath(importPath: string, options: PathTransformationOptions): string {
-    const { outputDir = 'tests' } = options;
-
-    return importPath
-      .replace(/cypress\/support/g, `${outputDir}/support`)
-      .replace(/cypress\/commands/g, `${outputDir}/support/commands`)
-      .replace(/cypress\/utilities/g, `${outputDir}/support/utilities`)
-      .replace(/cypress\/helpers/g, `${outputDir}/support/helpers`);
-  }
-
-  /**
-   * Check if import is for a test file
-   */
-  private isTestFileImport(importPath: string): boolean {
-    return importPath.includes('/e2e/') ||
-           importPath.includes('/integration/') ||
-           importPath.includes('/component/') ||
-           importPath.includes('.spec.') ||
-           importPath.includes('.test.');
-  }
-
-  /**
-   * Transform test file import path
-   */
-  private transformTestFilePath(importPath: string, options: PathTransformationOptions): string {
-    const { outputDir = 'tests' } = options;
-
-    return importPath
-      .replace(/cypress\/e2e/g, outputDir)
-      .replace(/cypress\/integration/g, outputDir)
-      .replace(/cypress\/component/g, `${outputDir}/component`)
-      .replace(/\.cy\.(js|ts)/, '.spec.$1');
-  }
-
-  /**
-   * Transform general cypress paths
-   */
-  private transformCypressPath(importPath: string, sourceDir: string, outputDir: string): string {
-    return importPath.replace(new RegExp(sourceDir, 'g'), outputDir);
-  }
-
-  /**
-   * Check if path has deep relative navigation (../../../)
-   */
-  private isDeepRelativePath(importPath: string): boolean {
-    return (importPath.match(/\.\.\//g) || []).length > 2;
-  }
-
-  /**
-   * Normalize deep relative paths
-   */
-  private normalizeDeepRelativePath(
-    importPath: string,
-    currentFilePath: string,
-    options: PathTransformationOptions,
-    warnings: string[]
-  ): string {
-    const relativeDepth = (importPath.match(/\.\.\//g) || []).length;
-
-    if (relativeDepth > 3) {
-      warnings.push(`Deep relative path detected (${relativeDepth} levels): ${importPath} - consider using absolute imports`);
-    }
-
-    // Try to resolve and simplify the path
+  normalizeRelativePath(importPath: string, currentFile: string, projectRoot: string): string {
     try {
-      const currentDir = path.dirname(currentFilePath);
-      const resolvedPath = path.resolve(currentDir, importPath);
-      const simplifiedPath = path.relative(currentDir, resolvedPath);
+      // Skip external libraries
+      if (this.isExternalLibrary(importPath)) {
+        return importPath;
+      }
 
-      // Convert back to forward slashes for consistency
-      return simplifiedPath.replace(/\\/g, '/');
+      // Skip already normalized paths
+      if (!importPath.startsWith('.')) {
+        return importPath;
+      }
+
+      // Resolve the absolute path of the import
+      const currentDir = path.dirname(currentFile);
+      const absoluteImportPath = path.resolve(currentDir, importPath);
+
+      // Calculate relative path from project root
+      const relativeFromRoot = path.relative(projectRoot, absoluteImportPath);
+
+      // Normalize excessive parent directory traversals
+      const normalizedPath = this.simplifyRelativePath(importPath, currentFile, projectRoot);
+
+      this.logger.debug(`Normalized path from ${importPath} to ${normalizedPath} for file ${currentFile}`);
+      return normalizedPath;
     } catch (error) {
-      warnings.push(`Could not normalize path: ${importPath}`);
+      this.logger.warn(`Failed to normalize path ${importPath} in ${currentFile}:`, error);
+      return importPath; // Return original on error
+    }
+  }
+
+  correctPageObjectPath(importPath: string, currentFile: string, outputStructure: OutputStructure): string {
+    try {
+      // Skip non-relative imports
+      if (!importPath.startsWith('.')) {
+        return importPath;
+      }
+
+      // Check if this is a page object import
+      if (this.isPageObjectImport(importPath)) {
+        const currentDir = path.dirname(currentFile);
+        const pagesDir = outputStructure.pagesDir || 'pages';
+
+        // Calculate the correct relative path to pages directory
+        const relativeToPagesDir = path.relative(currentDir, pagesDir);
+        const pageObjectName = path.basename(importPath);
+
+        const correctedPath = path.join(relativeToPagesDir, pageObjectName).replace(/\\/g, '/');
+
+        this.logger.debug(`Corrected page object path from ${importPath} to ${correctedPath}`);
+        return correctedPath;
+      }
+
+      return importPath;
+    } catch (error) {
+      this.logger.warn(`Failed to correct page object path ${importPath}:`, error);
       return importPath;
     }
   }
 
-  /**
-   * Get reason for transformation
-   */
-  private getTransformationReason(originalPath: string, transformedPath: string): string {
-    if (originalPath.includes('cypress/pages') || originalPath.includes('cypress/page-objects')) {
-      return 'Page object path updated for Playwright structure';
+  rewriteImportStatement(originalImport: string, pathMapping: PathMapping): string {
+    try {
+      let rewrittenImport = originalImport;
+
+      // Apply path mappings
+      Object.entries(pathMapping).forEach(([originalPath, newPath]) => {
+        const quotedOriginalPath = `"${originalPath}"`;
+        const quotedNewPath = `"${newPath}"`;
+        const singleQuotedOriginalPath = `'${originalPath}'`;
+        const singleQuotedNewPath = `'${newPath}'`;
+
+        if (rewrittenImport.includes(quotedOriginalPath)) {
+          rewrittenImport = rewrittenImport.replace(quotedOriginalPath, quotedNewPath);
+        } else if (rewrittenImport.includes(singleQuotedOriginalPath)) {
+          rewrittenImport = rewrittenImport.replace(singleQuotedOriginalPath, singleQuotedNewPath);
+        }
+      });
+
+      return rewrittenImport;
+    } catch (error) {
+      this.logger.warn(`Failed to rewrite import statement ${originalImport}:`, error);
+      return originalImport;
     }
-    if (originalPath.includes('cypress/fixtures')) {
-      return 'Fixture path updated for Playwright structure';
-    }
-    if (originalPath.includes('cypress/support')) {
-      return 'Support file path updated for Playwright structure';
-    }
-    if (originalPath.includes('cypress/e2e') || originalPath.includes('cypress/integration')) {
-      return 'Test file path updated for Playwright structure';
-    }
-    if ((originalPath.match(/\.\.\//g) || []).length > 2) {
-      return 'Deep relative path normalized';
-    }
-    if (originalPath.includes('cypress')) {
-      return 'Cypress path converted to Playwright structure';
-    }
-    return 'Path structure updated';
   }
 
-  /**
-   * Get relative path between two file paths
-   */
-  private getRelativePath(from: string, to: string): string {
-    const relativePath = path.relative(path.dirname(from), to);
+  rewriteNamedImports(originalImport: string, dedupedImports: string[]): string {
+    try {
+      // Extract the source module from the import statement
+      const sourceMatch = originalImport.match(/from\s+['"]([^'"]+)['"]/);
+      if (!sourceMatch) {
+        return originalImport;
+      }
 
-    // Ensure the path starts with ./ or ../
-    if (!relativePath.startsWith('./') && !relativePath.startsWith('../')) {
-      return './' + relativePath;
+      const source = sourceMatch[1];
+      const quote = originalImport.includes(`"${source}"`) ? '"' : "'";
+
+      // Handle different import patterns
+      if (dedupedImports.length === 0) {
+        // No named imports, might be default or namespace import
+        return originalImport;
+      }
+
+      // Check if there's a default import
+      const defaultImportMatch = originalImport.match(/import\s+(\w+)\s*,?\s*\{/);
+      const defaultImport = defaultImportMatch ? defaultImportMatch[1] + ', ' : '';
+
+      // Construct the new import statement
+      const namedImportsStr = dedupedImports.join(', ');
+      const newImport = `import ${defaultImport}{ ${namedImportsStr} } from ${quote}${source}${quote};`;
+
+      this.logger.debug(`Rewrote named imports from ${originalImport} to ${newImport}`);
+      return newImport;
+    } catch (error) {
+      this.logger.warn(`Failed to rewrite named imports ${originalImport}:`, error);
+      return originalImport;
     }
-
-    // Convert backslashes to forward slashes for consistency
-    return relativePath.replace(/\\/g, '/');
   }
 
-  /**
-   * Validate transformed path exists or could exist
-   */
-  private validateTransformedPath(transformedPath: string, warnings: string[]): void {
-    // Add basic validation warnings
-    if (transformedPath.includes('..\\') || transformedPath.includes('../..\\')) {
-      warnings.push(`Potentially problematic path structure: ${transformedPath}`);
+  generatePathMappings(imports: ImportInfo[], currentFile: string): PathMapping {
+    const mappings: PathMapping = {};
+
+    try {
+      imports.forEach(importInfo => {
+        if (this.shouldNormalizePath(importInfo.source)) {
+          const currentDir = path.dirname(currentFile);
+          const normalizedPath = this.normalizeDeepRelativePath(importInfo.source, currentDir);
+
+          if (normalizedPath !== importInfo.source) {
+            mappings[importInfo.source] = normalizedPath;
+          }
+        }
+      });
+
+      this.logger.debug(`Generated ${Object.keys(mappings).length} path mappings for ${currentFile}`);
+      return mappings;
+    } catch (error) {
+      this.logger.warn(`Failed to generate path mappings for ${currentFile}:`, error);
+      return {};
+    }
+  }
+
+  normalizeAllPaths(imports: ImportInfo[], currentFile: string, projectRoot: string): PathNormalizationResult[] {
+    return imports.map(importInfo => {
+      const originalPath = importInfo.source;
+
+      if (this.isExternalLibrary(originalPath)) {
+        return {
+          originalPath,
+          normalizedPath: originalPath,
+          changed: false,
+          reason: 'External library - not modified'
+        };
+      }
+
+      const normalizedPath = this.normalizeRelativePath(originalPath, currentFile, projectRoot);
+      const changed = normalizedPath !== originalPath;
+
+      return {
+        originalPath,
+        normalizedPath,
+        changed,
+        reason: changed ? 'Simplified relative path' : 'No changes needed'
+      };
+    });
+  }
+
+  private isExternalLibrary(importPath: string): boolean {
+    return this.externalLibraries.some(lib => importPath.startsWith(lib)) || !importPath.startsWith('.');
+  }
+
+  private isPageObjectImport(importPath: string): boolean {
+    const pagePrefixes = ['../pages/', './pages/', '/pages/'];
+    const pageNames = ['page', 'Page', '-page', 'cy-', '-cy'];
+
+    return pagePrefixes.some(prefix => importPath.includes(prefix)) ||
+           pageNames.some(name => importPath.includes(name));
+  }
+
+  private shouldNormalizePath(importPath: string): boolean {
+    // Only normalize relative paths with excessive parent directory traversal
+    return importPath.startsWith('.') && importPath.includes('../../../');
+  }
+
+  private simplifyRelativePath(importPath: string, currentFile: string, projectRoot: string): string {
+    try {
+      const currentDir = path.dirname(currentFile);
+      const absoluteImportPath = path.resolve(currentDir, importPath);
+      const relativeFromProject = path.relative(projectRoot, absoluteImportPath);
+
+      // Calculate new relative path from current file to the resolved location
+      const newRelativePath = path.relative(currentDir, absoluteImportPath);
+
+      // Ensure proper forward slashes for module imports
+      return newRelativePath.replace(/\\/g, '/');
+    } catch (error) {
+      this.logger.warn(`Failed to simplify relative path ${importPath}:`, error);
+      return importPath;
+    }
+  }
+
+  private normalizeDeepRelativePath(importPath: string, currentDir: string): string {
+    // Count the number of '../' patterns
+    const parentDirCount = (importPath.match(/\.\.\//g) || []).length;
+
+    // If there are more than 2 levels of parent directory traversal, try to simplify
+    if (parentDirCount > 2) {
+      // Remove excessive parent directory traversal
+      const pathParts = importPath.split('/');
+      const nonParentParts = pathParts.filter(part => part !== '..' && part !== '.');
+
+      // Reconstruct with fewer parent directories
+      const simplifiedPath = '../' + nonParentParts.join('/');
+
+      this.logger.debug(`Simplified deep relative path from ${importPath} to ${simplifiedPath}`);
+      return simplifiedPath;
     }
 
-    if (transformedPath.length > 200) {
-      warnings.push(`Very long path detected: ${transformedPath}`);
-    }
+    return importPath;
   }
 }

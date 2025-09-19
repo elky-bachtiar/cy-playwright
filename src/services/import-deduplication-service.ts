@@ -1,298 +1,354 @@
-import { ImportAnalyzer, ImportStatement } from './import-analyzer';
+import * as fs from 'fs-extra';
+import * as path from 'path';
+import { Logger } from '../utils/logger';
+import { ImportAnalyzer, ImportAnalysisResults, OrganizedImport } from './import-analyzer';
+import { ImportPathTransformer, PathMapping } from './import-path-transformer';
 
-export interface DeduplicationResult {
-  content: string;
-  removedDuplicates: string[];
-  removedCypressImports: string[];
-  addedPlaywrightImports: string[];
-  warnings: string[];
+export interface ImportDeduplicationResult {
+  originalFile: string;
+  cleanedContent: string;
+  analysis: ImportAnalysisResults;
+  pathMappings: PathMapping;
+  removedImports: string[];
+  duplicatesResolved: number;
+  syntaxValid: boolean;
+  errors: string[];
+}
+
+export interface DeduplicationOptions {
+  projectRoot: string;
+  outputDir?: string;
+  preserveComments?: boolean;
+  generateReport?: boolean;
 }
 
 export class ImportDeduplicationService {
-  private importAnalyzer: ImportAnalyzer;
+  private logger = new Logger('ImportDeduplicationService');
+  private analyzer = new ImportAnalyzer();
+  private pathTransformer = new ImportPathTransformer();
 
-  constructor() {
-    this.importAnalyzer = new ImportAnalyzer();
+  async deduplicateFile(filePath: string, options: DeduplicationOptions): Promise<ImportDeduplicationResult> {
+    try {
+      this.logger.info(`Processing file: ${filePath}`);
+
+      // Read original file
+      const originalContent = await fs.readFile(filePath, 'utf8');
+
+      // Analyze imports
+      const analysis = await this.analyzer.analyzeAllImports(filePath);
+
+      // Generate path mappings
+      const pathMappings = this.pathTransformer.generatePathMappings(analysis.legitImports, filePath);
+
+      // Process and clean the file
+      const cleanedContent = await this.processImports(originalContent, analysis, pathMappings, options);
+
+      // Validate syntax
+      const syntaxValid = await this.validateSyntax(cleanedContent, filePath);
+
+      const result: ImportDeduplicationResult = {
+        originalFile: filePath,
+        cleanedContent,
+        analysis,
+        pathMappings,
+        removedImports: analysis.cypressImports.map(ci => ci.source),
+        duplicatesResolved: analysis.duplicates.length,
+        syntaxValid,
+        errors: syntaxValid ? [] : ['Syntax validation failed']
+      };
+
+      this.logger.info(`Successfully processed ${filePath}: ${result.duplicatesResolved} duplicates resolved, ${result.removedImports.length} imports removed`);
+      return result;
+    } catch (error) {
+      this.logger.error(`Failed to deduplicate imports in ${filePath}:`, error);
+      throw error;
+    }
   }
 
-  /**
-   * Deduplicate and clean up imports in file content
-   */
-  deduplicateImports(content: string): DeduplicationResult {
-    const removedDuplicates: string[] = [];
-    const removedCypressImports: string[] = [];
-    const addedPlaywrightImports: string[] = [];
-    const warnings: string[] = [];
+  async deduplicateProject(projectPath: string, options: DeduplicationOptions): Promise<ImportDeduplicationResult[]> {
+    try {
+      this.logger.info(`Processing project: ${projectPath}`);
 
-    // Analyze current imports
-    const analysis = this.importAnalyzer.analyzeImports(content);
+      // Find all TypeScript test files
+      const testFiles = await this.findTestFiles(projectPath);
 
-    // Track what we're removing
-    analysis.cypressImports.forEach(imp => {
-      removedCypressImports.push(imp.source);
-    });
+      this.logger.info(`Found ${testFiles.length} test files to process`);
 
-    // Remove Cypress imports
-    const filteredImports = this.importAnalyzer.filterCypressImports(analysis.imports);
-
-    // Handle duplicates
-    const deduplicatedImports = this.deduplicateImportStatements(filteredImports);
-
-    // Track removed duplicates
-    if (analysis.duplicates.length > 0) {
-      const duplicateGroups = this.groupDuplicatesBySource(analysis.duplicates);
-      for (const [source, dups] of duplicateGroups) {
-        if (dups.length > 1) {
-          removedDuplicates.push(`Merged ${dups.length} duplicate imports from '${source}'`);
+      // Process each file
+      const results: ImportDeduplicationResult[] = [];
+      for (const filePath of testFiles) {
+        try {
+          const result = await this.deduplicateFile(filePath, options);
+          results.push(result);
+        } catch (error) {
+          this.logger.warn(`Skipping file ${filePath} due to error:`, error);
+          results.push({
+            originalFile: filePath,
+            cleanedContent: '',
+            analysis: { duplicates: [], cypressImports: [], legitImports: [], totalImports: 0 },
+            pathMappings: {},
+            removedImports: [],
+            duplicatesResolved: 0,
+            syntaxValid: false,
+            errors: [error instanceof Error ? error.message : String(error)]
+          });
         }
       }
+
+      // Generate summary report
+      if (options.generateReport) {
+        await this.generateReport(results, options);
+      }
+
+      this.logger.info(`Project processing complete: ${results.length} files processed`);
+      return results;
+    } catch (error) {
+      this.logger.error(`Failed to process project ${projectPath}:`, error);
+      throw error;
+    }
+  }
+
+  async validateDlaConversion(dlaProjectPath: string): Promise<boolean> {
+    try {
+      this.logger.info(`Validating DLA conversion: ${dlaProjectPath}`);
+
+      const options: DeduplicationOptions = {
+        projectRoot: dlaProjectPath,
+        generateReport: true
+      };
+
+      const results = await this.deduplicateProject(dlaProjectPath, options);
+
+      // Check success criteria
+      const totalFiles = results.length;
+      const successfulFiles = results.filter(r => r.syntaxValid && r.errors.length === 0).length;
+      const successRate = totalFiles > 0 ? (successfulFiles / totalFiles) * 100 : 0;
+
+      const totalDuplicates = results.reduce((sum, r) => sum + r.duplicatesResolved, 0);
+      const totalRemovedImports = results.reduce((sum, r) => sum + r.removedImports.length, 0);
+
+      this.logger.info(`DLA validation results: ${successRate.toFixed(1)}% success rate (${successfulFiles}/${totalFiles} files)`);
+      this.logger.info(`Resolved ${totalDuplicates} duplicate imports and removed ${totalRemovedImports} unwanted imports`);
+
+      // Success criteria: >85% success rate
+      return successRate >= 85;
+    } catch (error) {
+      this.logger.error(`DLA validation failed:`, error);
+      return false;
+    }
+  }
+
+  private async processImports(
+    originalContent: string,
+    analysis: ImportAnalysisResults,
+    pathMappings: PathMapping,
+    options: DeduplicationOptions
+  ): Promise<string> {
+    let cleanedContent = originalContent;
+
+    // Remove Cypress/Angular imports
+    for (const cypressImport of analysis.cypressImports) {
+      cleanedContent = this.removeImportLines(cleanedContent, cypressImport.source);
     }
 
-    // Add Playwright imports if needed
-    const playwrightImports = this.generatePlaywrightImports(content);
-    const allImports = [...deduplicatedImports, ...playwrightImports];
+    // Deduplicate imports
+    for (const duplicate of analysis.duplicates) {
+      cleanedContent = this.mergeImportLines(cleanedContent, duplicate);
+    }
 
-    playwrightImports.forEach(imp => {
-      addedPlaywrightImports.push(imp.source);
+    // Apply path corrections
+    for (const [originalPath, newPath] of Object.entries(pathMappings)) {
+      cleanedContent = this.pathTransformer.rewriteImportStatement(cleanedContent, { [originalPath]: newPath });
+    }
+
+    // Organize imports
+    const organized = await this.analyzer.organizeImports('/temp/file.ts');
+    cleanedContent = this.reorderImports(cleanedContent, organized.organized);
+
+    return cleanedContent;
+  }
+
+  private removeImportLines(content: string, importSource: string): string {
+    const lines = content.split('\n');
+    const filteredLines = lines.filter(line => {
+      const trimmedLine = line.trim();
+      return !(trimmedLine.includes(`from '${importSource}'`) ||
+               trimmedLine.includes(`from "${importSource}"`));
+    });
+    return filteredLines.join('\n');
+  }
+
+  private mergeImportLines(content: string, duplicate: any): string {
+    const lines = content.split('\n');
+    const importLines: string[] = [];
+    const nonImportLines: string[] = [];
+    const allNamedImports = new Set<string>();
+    let hasDefault = false;
+    let defaultName = '';
+
+    // Separate import lines for this source from other lines
+    lines.forEach(line => {
+      const trimmedLine = line.trim();
+      if (trimmedLine.includes(`from '${duplicate.source}'`) ||
+          trimmedLine.includes(`from "${duplicate.source}"`)) {
+        importLines.push(line);
+
+        // Extract named imports
+        const namedMatch = line.match(/\{\s*([^}]+)\s*\}/);
+        if (namedMatch) {
+          const namedImports = namedMatch[1].split(',').map(s => s.trim());
+          namedImports.forEach(imp => allNamedImports.add(imp));
+        }
+
+        // Check for default import
+        const defaultMatch = line.match(/import\s+(\w+)\s*,?\s*\{/);
+        if (defaultMatch && !hasDefault) {
+          hasDefault = true;
+          defaultName = defaultMatch[1];
+        }
+      } else {
+        nonImportLines.push(line);
+      }
     });
 
-    // Sort imports
-    const sortedImports = this.importAnalyzer.sortImports(allImports);
+    // Create merged import line
+    if (importLines.length > 1) {
+      const quote = duplicate.source.includes("'") ? "'" : '"';
+      const namedImportsStr = Array.from(allNamedImports).join(', ');
+      const defaultPart = hasDefault ? `${defaultName}, ` : '';
+      const mergedImport = `import ${defaultPart}{ ${namedImportsStr} } from ${quote}${duplicate.source}${quote};`;
 
-    // Generate new content
-    const newContent = this.replaceImportsInContent(content, sortedImports);
-
-    // Add warnings for conflicts
-    warnings.push(...analysis.conflicts);
-
-    return {
-      content: newContent,
-      removedDuplicates,
-      removedCypressImports,
-      addedPlaywrightImports,
-      warnings
-    };
-  }
-
-  /**
-   * Deduplicate import statements by merging those with same source
-   */
-  private deduplicateImportStatements(imports: ImportStatement[]): ImportStatement[] {
-    const sourceMap = new Map<string, ImportStatement[]>();
-
-    // Group imports by source
-    for (const imp of imports) {
-      if (!sourceMap.has(imp.source)) {
-        sourceMap.set(imp.source, []);
-      }
-      sourceMap.get(imp.source)!.push(imp);
-    }
-
-    const deduplicatedImports: ImportStatement[] = [];
-
-    // Merge imports with same source
-    for (const [source, importsForSource] of sourceMap) {
-      if (importsForSource.length === 1) {
-        deduplicatedImports.push(importsForSource[0]);
-      } else {
-        // Merge multiple imports from same source
-        const merged = this.importAnalyzer.mergeImports(importsForSource);
-        deduplicatedImports.push(merged);
-      }
-    }
-
-    return deduplicatedImports;
-  }
-
-  /**
-   * Group duplicate imports by source
-   */
-  private groupDuplicatesBySource(duplicates: ImportStatement[]): Map<string, ImportStatement[]> {
-    const groups = new Map<string, ImportStatement[]>();
-
-    for (const duplicate of duplicates) {
-      if (!groups.has(duplicate.source)) {
-        groups.set(duplicate.source, []);
-      }
-      groups.get(duplicate.source)!.push(duplicate);
-    }
-
-    return groups;
-  }
-
-  /**
-   * Generate necessary Playwright imports based on content
-   */
-  private generatePlaywrightImports(content: string): ImportStatement[] {
-    const imports: ImportStatement[] = [];
-
-    // Always add basic Playwright test imports if test content is present
-    if (this.containsTestContent(content)) {
-      imports.push({
-        raw: "import { test, expect } from '@playwright/test';",
-        source: '@playwright/test',
-        namedImports: ['test', 'expect'],
-        type: 'playwright'
-      });
-    }
-
-    // Add Page import if page object patterns detected
-    if (this.containsPageObjectPatterns(content)) {
-      // Check if Page is already imported
-      const hasPageImport = imports.some(imp =>
-        imp.namedImports.includes('Page') || imp.namedImports.includes('Locator')
+      // Insert merged import at the position of the first import
+      const firstImportIndex = lines.findIndex(line =>
+        line.includes(`from '${duplicate.source}'`) ||
+        line.includes(`from "${duplicate.source}"`)
       );
 
-      if (!hasPageImport) {
-        imports.push({
-          raw: "import { Page, Locator } from '@playwright/test';",
-          source: '@playwright/test',
-          namedImports: ['Page', 'Locator'],
-          type: 'playwright'
-        });
-      }
+      nonImportLines.splice(firstImportIndex, 0, mergedImport);
     }
 
-    // Add fs and path imports if fixture patterns detected
-    if (this.containsFixturePatterns(content)) {
-      imports.push({
-        raw: "import * as fs from 'fs-extra';",
-        source: 'fs-extra',
-        namespaceImport: 'fs',
-        namedImports: [],
-        type: 'external'
-      });
-
-      imports.push({
-        raw: "import * as path from 'path';",
-        source: 'path',
-        namespaceImport: 'path',
-        namedImports: [],
-        type: 'builtin'
-      });
-    }
-
-    return imports;
+    return nonImportLines.join('\n');
   }
 
-  /**
-   * Check if content contains test-related patterns
-   */
-  private containsTestContent(content: string): boolean {
-    return /\b(describe|it|test|beforeEach|afterEach|before|after)\s*\(/.test(content) ||
-           content.includes('cy.') ||
-           content.includes('test(') ||
-           content.includes('test.describe');
-  }
-
-  /**
-   * Check if content contains page object patterns
-   */
-  private containsPageObjectPatterns(content: string): boolean {
-    return /class\s+\w+Page/.test(content) ||
-           content.includes('constructor(private page: Page)') ||
-           content.includes('Page, Locator') ||
-           /@By\./.test(content);
-  }
-
-  /**
-   * Check if content contains fixture patterns
-   */
-  private containsFixturePatterns(content: string): boolean {
-    return content.includes('cy.fixture(') ||
-           content.includes('fixtures/') ||
-           content.includes('JSON.parse') && content.includes('readFile');
-  }
-
-  /**
-   * Replace imports in content with new deduplicated imports
-   */
-  private replaceImportsInContent(content: string, newImports: ImportStatement[]): string {
+  private reorderImports(content: string, organized: OrganizedImport[]): string {
     const lines = content.split('\n');
-    const newLines: string[] = [];
-    let inImportSection = false;
-    let importSectionEnded = false;
+    const importLines: string[] = [];
+    const nonImportLines: string[] = [];
 
-    // Find where imports section starts and ends
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
+    // Separate import lines from other lines
+    lines.forEach(line => {
+      if (line.trim().startsWith('import ')) {
+        importLines.push(line);
+      } else {
+        nonImportLines.push(line);
+      }
+    });
 
-      // Check if this line is an import
-      const isImportLine = line.startsWith('import ') && line.includes(' from ');
+    // Generate organized import lines
+    const organizedImportLines: string[] = [];
+    let currentCategory = '';
 
-      if (isImportLine && !importSectionEnded) {
-        if (!inImportSection) {
-          // First import found, add all new imports here
-          inImportSection = true;
-          const importSection = this.generateImportSection(newImports);
-          newLines.push(importSection);
+    organized.forEach(orgImport => {
+      if (orgImport.category !== currentCategory) {
+        if (organizedImportLines.length > 0) {
+          organizedImportLines.push(''); // Add blank line between categories
         }
-        // Skip this line (it's being replaced)
-        continue;
-      } else if (inImportSection && !isImportLine && line && !line.startsWith('//')) {
-        // Import section has ended
-        inImportSection = false;
-        importSectionEnded = true;
-        newLines.push(lines[i]);
-      } else if (!inImportSection) {
-        // Normal line, keep it
-        newLines.push(lines[i]);
+        currentCategory = orgImport.category;
       }
-    }
 
-    // If no imports were found, add them at the beginning
-    if (!importSectionEnded && newImports.length > 0) {
-      const importSection = this.generateImportSection(newImports);
-      return `${importSection}\n\n${content}`;
-    }
+      const quote = orgImport.source.includes("'") ? "'" : '"';
+      let importStatement = 'import ';
 
-    return newLines.join('\n');
+      if (orgImport.defaultImport) {
+        importStatement += orgImport.defaultImport;
+        if (orgImport.imports.length > 0 || orgImport.namespaceImport) {
+          importStatement += ', ';
+        }
+      }
+
+      if (orgImport.namespaceImport) {
+        importStatement += `* as ${orgImport.namespaceImport}`;
+      } else if (orgImport.imports.length > 0) {
+        importStatement += `{ ${orgImport.imports.join(', ')} }`;
+      }
+
+      importStatement += ` from ${quote}${orgImport.source}${quote};`;
+      organizedImportLines.push(importStatement);
+    });
+
+    // Combine organized imports with non-import lines
+    const result = [...organizedImportLines, '', ...nonImportLines.filter(line => line.trim() !== '')];
+    return result.join('\n');
   }
 
-  /**
-   * Generate formatted import section
-   */
-  private generateImportSection(imports: ImportStatement[]): string {
-    if (imports.length === 0) {
-      return '';
+  private async validateSyntax(content: string, filePath: string): Promise<boolean> {
+    try {
+      // Use TypeScript compiler to validate syntax
+      const ts = await import('typescript');
+      const sourceFile = ts.createSourceFile(
+        filePath,
+        content,
+        ts.ScriptTarget.Latest,
+        true
+      );
+
+      const diagnostics = (sourceFile as any).parseDiagnostics || [];
+      return diagnostics.length === 0;
+    } catch (error) {
+      this.logger.warn(`Syntax validation failed for ${filePath}:`, error);
+      return false;
     }
-
-    const groups: { [key: string]: ImportStatement[] } = {
-      builtin: [],
-      external: [],
-      playwright: [],
-      relative: []
-    };
-
-    // Group imports by type
-    for (const imp of imports) {
-      if (groups[imp.type]) {
-        groups[imp.type].push(imp);
-      }
-    }
-
-    const sections: string[] = [];
-
-    // Add each group with spacing
-    for (const [groupName, groupImports] of Object.entries(groups)) {
-      if (groupImports.length > 0) {
-        const importLines = groupImports.map(imp => imp.raw);
-        sections.push(importLines.join('\n'));
-      }
-    }
-
-    return sections.join('\n\n');
   }
 
-  /**
-   * Clean up import statement formatting
-   */
-  private cleanImportStatement(importStatement: string): string {
-    return importStatement
-      .replace(/\s+/g, ' ') // Normalize whitespace
-      .replace(/,\s*}/g, ' }') // Clean up trailing commas
-      .replace(/{\s+/g, '{ ') // Clean up opening braces
-      .replace(/\s+}/g, ' }') // Clean up closing braces
-      .trim();
+  private async findTestFiles(projectPath: string): Promise<string[]> {
+    const testFiles: string[] = [];
+
+    async function scanDirectory(dir: string) {
+      try {
+        const items = await fs.readdir(dir);
+
+        for (const item of items) {
+          const fullPath = path.join(dir, item);
+          const stat = await fs.stat(fullPath);
+
+          if (stat.isDirectory() && !item.startsWith('.') && item !== 'node_modules') {
+            await scanDirectory(fullPath);
+          } else if (stat.isFile() && (item.endsWith('.spec.ts') || item.endsWith('.cy.ts'))) {
+            testFiles.push(fullPath);
+          }
+        }
+      } catch (error) {
+        // Skip directories we can't read
+      }
+    }
+
+    await scanDirectory(projectPath);
+    return testFiles;
+  }
+
+  private async generateReport(results: ImportDeduplicationResult[], options: DeduplicationOptions): Promise<void> {
+    try {
+      const reportPath = path.join(options.outputDir || options.projectRoot, 'import-deduplication-report.json');
+
+      const summary = {
+        timestamp: new Date().toISOString(),
+        totalFiles: results.length,
+        successfulFiles: results.filter(r => r.syntaxValid).length,
+        totalDuplicatesResolved: results.reduce((sum, r) => sum + r.duplicatesResolved, 0),
+        totalImportsRemoved: results.reduce((sum, r) => sum + r.removedImports.length, 0),
+        files: results.map(r => ({
+          file: r.originalFile,
+          duplicatesResolved: r.duplicatesResolved,
+          importsRemoved: r.removedImports.length,
+          syntaxValid: r.syntaxValid,
+          errors: r.errors
+        }))
+      };
+
+      await fs.writeFile(reportPath, JSON.stringify(summary, null, 2));
+      this.logger.info(`Generated report: ${reportPath}`);
+    } catch (error) {
+      this.logger.warn(`Failed to generate report:`, error);
+    }
   }
 }

@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach } from '@jest/globals';
+import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
 import { ThenPatternTransformer } from '../src/services/then-pattern-transformer';
 
 describe('ThenPatternTransformer', () => {
@@ -6,17 +6,28 @@ describe('ThenPatternTransformer', () => {
 
   beforeEach(() => {
     transformer = new ThenPatternTransformer();
+    jest.clearAllMocks();
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
   });
 
   describe('Simple cy.then() Pattern Conversion', () => {
     test('should convert basic cy.then() callback to async/await', () => {
       // Arrange
-      const cypressCode = `cy.get('[data-testid="submit"]').then(($btn) => {
+      const cypressPattern = `cy.get('[data-testid="submit"]').then(($btn) => {
   expect($btn).to.be.visible;
 });`;
 
       // Act
-      const result = transformer.convertThenPattern(cypressCode);
+      const result = transformer.convertThenPattern(cypressPattern);
+
+      // Debug output
+      console.log('Input:', cypressPattern);
+      console.log('Output:', result.playwrightPattern);
+      console.log('Valid:', result.isValid);
+      console.log('Success:', result.conversionSuccess);
 
       // Assert
       expect(result.isValid).toBe(true);
@@ -27,14 +38,14 @@ describe('ThenPatternTransformer', () => {
 
     test('should convert cy.then() with return values and chaining', () => {
       // Arrange
-      const cypressCode = `cy.url().then((url) => {
+      const cypressPattern = `cy.url().then((url) => {
   return url.split('/').pop();
 }).then((id) => {
-  console.log('User ID:', id);
+  cy.log('User ID:', id);
 });`;
 
       // Act
-      const result = transformer.convertThenPattern(cypressCode);
+      const result = transformer.convertThenPattern(cypressPattern);
 
       // Assert
       expect(result.isValid).toBe(true);
@@ -46,12 +57,12 @@ describe('ThenPatternTransformer', () => {
 
     test('should convert cy.then() with simple element interaction', () => {
       // Arrange
-      const cypressCode = `cy.get('#username').then(($input) => {
+      const cypressPattern = `cy.get('#username').then(($input) => {
   $input.val('testuser');
 });`;
 
       // Act
-      const result = transformer.convertThenPattern(cypressCode);
+      const result = transformer.convertThenPattern(cypressPattern);
 
       // Assert
       expect(result.isValid).toBe(true);
@@ -63,27 +74,30 @@ describe('ThenPatternTransformer', () => {
 
   describe('Complex cy.then() Pattern Conversion', () => {
     test('should handle nested cy.then() patterns from DLA examples', () => {
-      // Arrange
-      const cypressCode = `cy.then(() => {
-  cy.get('[data-testid="complex-form"]').then(($form) => {
-    expect($form).to.be.visible;
-    cy.get('[data-testid="submit"]').click();
+      // Arrange - Based on DLA project patterns
+      const cypressPattern = `cy.wait('@loginRequest').then((interception) => {
+  const userId = interception.response.body.userId;
+  cy.url().then((url) => {
+    expect(url).to.include(\`/dashboard/\${userId}\`);
   });
 });`;
 
       // Act
-      const result = transformer.convertThenPattern(cypressCode);
+      const result = transformer.convertThenPattern(cypressPattern);
 
       // Assert
       expect(result.isValid).toBe(true);
-      expect(result.complexity).toBe('high');
-      expect(result.transformationMetadata.strategy).toBe('nested');
-      expect(result.playwrightPattern).toContain('// Nested then patterns converted to sequential async operations');
+      expect(result.playwrightPattern).toContain('const interception = await page.waitForResponse');
+      expect(result.playwrightPattern).toContain('const responseBody = await interception.json();');
+      expect(result.playwrightPattern).toContain('const userId = responseBody.userId;');
+      expect(result.playwrightPattern).toContain('const url = page.url();');
+      expect(result.playwrightPattern).toContain('await expect(page).toHaveURL');
+      expect(result.conversionSuccess).toBe(true);
     });
 
     test('should convert cy.then() with complex logic and mock setup', () => {
       // Arrange
-      const cypressCode = `cy.intercept('GET', '/api/user').as('userRequest');
+      const cypressPattern = `cy.intercept('GET', '/api/user').as('userRequest');
 cy.visit('/profile');
 cy.wait('@userRequest').then((interception) => {
   const userData = interception.response.body;
@@ -92,52 +106,59 @@ cy.wait('@userRequest').then((interception) => {
 });`;
 
       // Act
-      const result = transformer.convertThenPattern(cypressCode);
+      const result = transformer.convertThenPattern(cypressPattern);
 
       // Assert
       expect(result.isValid).toBe(true);
       expect(result.playwrightPattern).toContain('await page.route(\'/api/user\'');
-      expect(result.playwrightPattern).toContain('await page.goto(\'/profile\')');
-      expect(result.playwrightPattern).toContain('const responseBody = await');
+      expect(result.playwrightPattern).toContain('await page.goto(\'/profile\');');
+      expect(result.playwrightPattern).toContain('const interception = await page.waitForResponse');
+      expect(result.playwrightPattern).toContain('const userData = await interception.json();');
+      expect(result.playwrightPattern).toContain('await expect(page.locator(\'[data-testid="user-name"]\')).toContainText(userData.name);');
+      expect(result.playwrightPattern).toContain('await expect(page.locator(\'[data-testid="user-email"]\')).toContainText(userData.email);');
       expect(result.conversionSuccess).toBe(true);
     });
 
     test('should handle URL parameter extraction patterns', () => {
-      // Arrange
-      const cypressCode = `cy.url().then((currentUrl) => {
-  const params = new URLSearchParams(currentUrl.split('?')[1]);
-  const userId = params.get('id');
-  cy.wrap(userId).as('currentUserId');
+      // Arrange - Common DLA pattern for extracting IDs from URLs
+      const cypressPattern = `cy.url().then((url) => {
+  const bookId = url.match(/\\/books\\/([0-9]+)/)[1];
+  cy.log('Extracted book ID:', bookId);
+  cy.get('[data-testid="book-details"]').should('be.visible');
 });`;
 
       // Act
-      const result = transformer.convertThenPattern(cypressCode);
+      const result = transformer.convertThenPattern(cypressPattern);
 
       // Assert
       expect(result.isValid).toBe(true);
       expect(result.playwrightPattern).toContain('const url = page.url();');
-      expect(result.playwrightPattern).toContain('const params = new URLSearchParams');
-      expect(result.playwrightPattern).toContain('const userId = params.get(\'id\');');
+      expect(result.playwrightPattern).toContain('const bookId = url.match(/\\/books\\/([0-9]+)/)[1];');
+      expect(result.playwrightPattern).toContain('console.log(\'Extracted book ID:\', bookId);');
+      expect(result.playwrightPattern).toContain('await expect(page.locator(\'[data-testid="book-details"]\')).toBeVisible();');
       expect(result.conversionSuccess).toBe(true);
     });
 
     test('should handle conditional logic within cy.then()', () => {
       // Arrange
-      const cypressCode = `cy.get('[data-testid="status"]').then(($status) => {
-  if ($status.text().includes('Active')) {
-    cy.get('[data-testid="deactivate"]').click();
+      const cypressPattern = `cy.get('[data-testid="modal"]').then(($modal) => {
+  if ($modal.is(':visible')) {
+    cy.get('[data-testid="close-modal"]').click();
   } else {
-    cy.get('[data-testid="activate"]').click();
+    cy.get('[data-testid="open-modal"]').click();
   }
 });`;
 
       // Act
-      const result = transformer.convertThenPattern(cypressCode);
+      const result = transformer.convertThenPattern(cypressPattern);
 
       // Assert
       expect(result.isValid).toBe(true);
-      expect(result.playwrightPattern).toContain('const status = page.locator(\'[data-testid="status"]\');');
-      expect(result.playwrightPattern).toContain('if (status.text().includes(\'Active\'))');
+      expect(result.playwrightPattern).toContain('const modal = page.locator(\'[data-testid="modal"]\');');
+      expect(result.playwrightPattern).toContain('if (await modal.isVisible()) {');
+      expect(result.playwrightPattern).toContain('await page.locator(\'[data-testid="close-modal"]\').click();');
+      expect(result.playwrightPattern).toContain('} else {');
+      expect(result.playwrightPattern).toContain('await page.locator(\'[data-testid="open-modal"]\').click();');
       expect(result.conversionSuccess).toBe(true);
     });
   });
@@ -145,153 +166,151 @@ cy.wait('@userRequest').then((interception) => {
   describe('Error Handling and Edge Cases', () => {
     test('should handle malformed cy.then() patterns gracefully', () => {
       // Arrange
-      const cypressCode = `cy.get('[data-testid="broken').then((malformed`;
+      const cypressPattern = `cy.get('[data-testid="invalid').then(($el) => {
+  // Missing closing bracket in selector
+  $el.click();
+}`;
 
       // Act
-      const result = transformer.convertThenPattern(cypressCode);
+      const result = transformer.convertThenPattern(cypressPattern);
 
       // Assert
-      expect(result.isValid).toBe(true); // Should handle gracefully
-      expect(result.transformationMetadata.strategy).toBe('error');
-      expect(result.transformationMetadata.warnings).toContain('This pattern could not be automatically converted');
+      expect(result.isValid).toBe(false);
+      expect(result.conversionSuccess).toBe(false);
+      expect(result.conversionNotes).toContain('Malformed selector or syntax error detected');
     });
 
     test('should mark unsupported jQuery methods for manual review', () => {
       // Arrange
-      const cypressCode = `cy.get('.element').then(($el) => {
-  $el.addClass('active');
-  $el.data('custom', 'value');
-  $el.trigger('customEvent');
+      const cypressPattern = `cy.get('.slider').then(($slider) => {
+  $slider.slider('value', 50);
+  $slider.trigger('slidechange');
 });`;
 
       // Act
-      const result = transformer.convertThenPattern(cypressCode);
+      const result = transformer.convertThenPattern(cypressPattern);
 
       // Assert
       expect(result.isValid).toBe(true);
-      expect(result.playwrightPattern).toContain('element.addClass(\'active\')');
-      expect(result.transformationMetadata.notes).toContain('Converted simple cy.get().then() to async/await pattern');
+      expect(result.transformationMetadata.requiresManualReview).toBe(true);
+      expect(result.conversionNotes).toContain('jQuery method "slider" requires manual conversion');
+      expect(result.playwrightPattern).toContain('// TODO: Convert jQuery slider() method to Playwright equivalent');
     });
 
     test('should handle deeply nested cy.then() patterns', () => {
       // Arrange
-      const cypressCode = `cy.get('[data-testid="outer"]').then(($outer) => {
-  $outer.find('[data-testid="inner"]').then(($inner) => {
-    $inner.find('[data-testid="deepest"]').then(($deepest) => {
-      expect($deepest).to.be.visible;
+      const cypressPattern = `cy.get('#form').then(($form) => {
+  cy.get('#input1').then(($input1) => {
+    cy.get('#input2').then(($input2) => {
+      $input1.val('value1');
+      $input2.val('value2');
+      $form.submit();
     });
   });
 });`;
 
       // Act
-      const result = transformer.convertThenPattern(cypressCode);
+      const result = transformer.convertThenPattern(cypressPattern);
 
       // Assert
       expect(result.isValid).toBe(true);
-      expect(result.complexity).toBe('high');
-      expect(result.transformationMetadata.strategy).toBe('nested');
-      expect(result.transformationMetadata.warnings).toContain('Nested then patterns may require manual review for correctness');
+      expect(result.transformationMetadata.complexity).toBe('high');
+      expect(result.playwrightPattern).toContain('const form = page.locator(\'#form\');');
+      expect(result.playwrightPattern).toContain('const input1 = page.locator(\'#input1\');');
+      expect(result.playwrightPattern).toContain('const input2 = page.locator(\'#input2\');');
+      expect(result.playwrightPattern).toContain('await input1.fill(\'value1\');');
+      expect(result.playwrightPattern).toContain('await input2.fill(\'value2\');');
+      expect(result.playwrightPattern).toContain('await form.submit();');
+      expect(result.conversionSuccess).toBe(true);
     });
   });
 
   describe('Pattern Analysis and Metadata', () => {
     test('should categorize simple patterns as low complexity', () => {
       // Arrange
-      const cypressCode = `cy.get('[data-testid="simple"]').then(($el) => {
-  expect($el).to.be.visible;
+      const cypressPattern = `cy.get('#button').then(($btn) => {
+  $btn.click();
 });`;
 
       // Act
-      const result = transformer.convertThenPattern(cypressCode);
+      const result = transformer.convertThenPattern(cypressPattern);
 
       // Assert
-      expect(result.complexity).toBe('low');
-      expect(result.transformationMetadata.strategy).toBe('simple');
+      expect(result.transformationMetadata.complexity).toBe('low');
+      expect(result.transformationMetadata.requiresManualReview).toBe(false);
     });
 
     test('should categorize nested patterns as high complexity', () => {
       // Arrange
-      const cypressCode = `cy.then(() => {
-  cy.get('[data-testid="first"]').then(() => {
-    cy.get('[data-testid="second"]').then(() => {
-      // deeply nested
+      const cypressPattern = `cy.wait('@api').then((interception) => {
+  cy.url().then((url) => {
+    cy.get('.result').then(($result) => {
+      // Complex nested logic
     });
   });
 });`;
 
       // Act
-      const result = transformer.convertThenPattern(cypressCode);
+      const result = transformer.convertThenPattern(cypressPattern);
 
       // Assert
-      expect(result.complexity).toBe('high');
-      expect(result.transformationMetadata.strategy).toBe('nested');
+      expect(result.transformationMetadata.complexity).toBe('high');
     });
 
     test('should provide detailed conversion notes for complex transformations', () => {
       // Arrange
-      const cypressCode = `cy.intercept('/api/data').as('apiCall');
-cy.wait('@apiCall').then((interception) => {
-  // complex interception handling
+      const cypressPattern = `cy.window().then((win) => {
+  win.localStorage.setItem('token', 'abc123');
+  cy.reload();
 });`;
 
       // Act
-      const result = transformer.convertThenPattern(cypressCode);
+      const result = transformer.convertThenPattern(cypressPattern);
 
       // Assert
-      expect(result.transformationMetadata.notes).toBeDefined();
-      expect(result.transformationMetadata.notes.length).toBeGreaterThan(0);
-      expect(result.transformationMetadata.notes[0]).toContain('Converted');
+      expect(result.conversionNotes.length).toBeGreaterThan(0);
+      expect(result.conversionNotes).toContain('Converted window.localStorage to page.evaluate with localStorage');
+      expect(result.playwrightPattern).toContain('await page.evaluate(() => localStorage.setItem(\'token\', \'abc123\'));');
+      expect(result.playwrightPattern).toContain('await page.reload();');
     });
   });
 
   describe('Integration with Other Patterns', () => {
     test('should handle cy.then() combined with custom commands', () => {
       // Arrange
-      const cypressCode = `cy.customCommand().then((result) => {
-  cy.anotherCustomCommand(result);
+      const cypressPattern = `cy.login('user', 'pass').then(() => {
+  cy.get('[data-testid="dashboard"]').should('be.visible');
 });`;
 
       // Act
-      const result = transformer.convertThenPattern(cypressCode);
+      const result = transformer.convertThenPattern(cypressPattern);
 
       // Assert
       expect(result.isValid).toBe(true);
-      expect(result.playwrightPattern).toContain('// TODO: Convert');
-      expect(result.conversionSuccess).toBe(true);
+      expect(result.conversionNotes).toContain('Custom command "login" detected - may require additional conversion');
+      expect(result.playwrightPattern).toContain('// TODO: Convert custom command cy.login() to Playwright equivalent');
+      expect(result.playwrightPattern).toContain('await expect(page.locator(\'[data-testid="dashboard"]\')).toBeVisible();');
     });
 
     test('should preserve variable scope across async/await conversion', () => {
       // Arrange
-      const cypressCode = `cy.get('[data-testid="input"]').then(($input) => {
-  const originalValue = $input.val();
-  $input.clear();
-  $input.type(originalValue + '_modified');
+      const cypressPattern = `let userId;
+cy.request('/api/user').then((response) => {
+  userId = response.body.id;
+}).then(() => {
+  cy.visit(\`/profile/\${userId}\`);
 });`;
 
       // Act
-      const result = transformer.convertThenPattern(cypressCode);
+      const result = transformer.convertThenPattern(cypressPattern);
 
       // Assert
       expect(result.isValid).toBe(true);
-      expect(result.playwrightPattern).toContain('const input = page.locator(\'[data-testid="input"]\');');
-      expect(result.playwrightPattern).toContain('const originalValue = input.val();');
-      expect(result.playwrightPattern).toContain('input.clear();');
-      expect(result.playwrightPattern).toContain('input.type(originalValue + \'_modified\');');
-      expect(result.conversionSuccess).toBe(true);
-    });
-
-    test('should handle custom commands with async operations', () => {
-      // Arrange
-      const cypressCode = `cy.asyncCustomCommand().then((response) => {
-  expect(response.status).to.equal(200);
-});`;
-
-      // Act
-      const result = transformer.convertThenPattern(cypressCode);
-
-      // Assert
-      expect(result.isValid).toBe(true);
-      expect(result.transformationMetadata.strategy).toBe('error'); // Generic pattern
+      expect(result.playwrightPattern).toContain('let userId;');
+      expect(result.playwrightPattern).toContain('const response = await page.request.get(\'/api/user\');');
+      expect(result.playwrightPattern).toContain('const responseBody = await response.json();');
+      expect(result.playwrightPattern).toContain('userId = responseBody.id;');
+      expect(result.playwrightPattern).toContain('await page.goto(`/profile/${userId}`);');
       expect(result.conversionSuccess).toBe(true);
     });
   });

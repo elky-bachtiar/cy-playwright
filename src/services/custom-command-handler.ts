@@ -1,320 +1,486 @@
+import * as ts from 'typescript';
 import { Logger } from '../utils/logger';
-
-export interface CustomCommandConversionResult {
-  isValid: boolean;
-  playwrightEquivalent: string;
-  conversionSuccess: boolean;
-  transformationMetadata: {
-    strategy: 'direct' | 'utility' | 'pageobject';
-    complexity: 'low' | 'medium' | 'high';
-    notes?: string[];
-  };
-  warnings?: string[];
-  errors?: string[];
-}
+import {
+  CustomCommandAnalysis,
+  ConvertedCustomCommand
+} from '../types/pattern-conversion';
 
 export class CustomCommandHandler {
-  private logger: Logger;
+  private logger = new Logger('CustomCommandHandler');
 
-  constructor() {
-    this.logger = new Logger('CustomCommandHandler');
-  }
+  // Known custom command mappings
+  private readonly knownCommandMappings = new Map<string, any>([
+    ['login', { strategy: 'utility', complexity: 'medium' }],
+    ['selectDropdown', { strategy: 'direct', complexity: 'low' }],
+    ['uploadFile', { strategy: 'direct', complexity: 'low' }],
+    ['customLog', { strategy: 'direct', complexity: 'low' }],
+    ['navigateToSection', { strategy: 'utility', complexity: 'medium' }],
+    ['fillLoginForm', { strategy: 'pageObject', complexity: 'high' }],
+    ['submitLoginForm', { strategy: 'pageObject', complexity: 'high' }],
+    ['openModal', { strategy: 'pageObject', complexity: 'high' }],
+    ['fillModalForm', { strategy: 'pageObject', complexity: 'high' }],
+    ['saveModal', { strategy: 'pageObject', complexity: 'high' }],
+    ['closeModal', { strategy: 'pageObject', complexity: 'high' }],
+    ['getApiData', { strategy: 'utility', complexity: 'medium' }],
+    ['conditionalClick', { strategy: 'utility', complexity: 'medium' }],
+    ['waitForElement', { strategy: 'utility', complexity: 'medium' }],
+    ['clearCookies', { strategy: 'manual', complexity: 'medium' }],
+    ['clearLocalStorage', { strategy: 'manual', complexity: 'medium' }],
+    ['setCookie', { strategy: 'manual', complexity: 'medium' }],
+    ['customDragAndDrop', { strategy: 'manual', complexity: 'high' }],
+    ['clickButton', { strategy: 'direct', complexity: 'low' }],
+    ['performLogin', { strategy: 'utility', complexity: 'medium' }],
+    ['navigateComplexWorkflow', { strategy: 'pageObject', complexity: 'high' }],
+    ['setupTestData', { strategy: 'utility', complexity: 'high' }],
+    ['runComplexValidation', { strategy: 'utility', complexity: 'high' }],
+    ['createRecord', { strategy: 'utility', complexity: 'medium' }],
+    ['waitForApiResponse', { strategy: 'utility', complexity: 'medium' }],
+    ['validateResponse', { strategy: 'utility', complexity: 'medium' }]
+  ]);
 
-  /**
-   * Convert Cypress custom command to Playwright equivalent
-   */
-  convertCustomCommand(cypressCode: string): CustomCommandConversionResult {
+  public convertCustomCommand(cypressCode: string): ConvertedCustomCommand {
     this.logger.info('Converting custom commands to Playwright equivalents');
 
     try {
-      // Extract command name and parameters
-      const commandMatch = cypressCode.match(/cy\.(\w+)\((.*)\)/s);
-      if (!commandMatch) {
-        return this.createErrorResult('Invalid Cypress command format');
-      }
+      // Analyze the custom commands in the code
+      const analysis = this.analyzeCustomCommands(cypressCode);
 
-      const [, commandName, argsString] = commandMatch;
-      const args = this.parseArguments(argsString);
+      // Convert the commands
+      const playwrightCode = this.transformCustomCommands(cypressCode, analysis);
 
-      let result: CustomCommandConversionResult;
+      // Validate the generated code
+      const isValid = this.validateGeneratedCode(playwrightCode);
 
-      // Handle different custom command patterns
-      switch (commandName) {
-        case 'login':
-          result = this.convertLoginCommand(args);
-          break;
-        case 'selectDropdown':
-          result = this.convertSelectDropdownCommand(args);
-          break;
-        case 'uploadFile':
-          result = this.convertUploadFileCommand(args);
-          break;
-        case 'customThen':
-          result = this.convertCustomThenCommand(cypressCode);
-          break;
-        case 'customLog':
-          result = this.convertCustomLogCommand(args);
-          break;
-        case 'navigateToSection':
-          result = this.convertNavigateToSectionCommand(args);
-          break;
-        case 'fillLoginForm':
-          result = this.convertFillLoginFormCommand(args);
-          break;
-        default:
-          result = this.convertGenericCustomCommand(commandName, args);
-          break;
-      }
+      const result: ConvertedCustomCommand = {
+        originalCommand: cypressCode,
+        playwrightEquivalent: playwrightCode,
+        isValid,
+        conversionSuccess: isValid,
+        conversionNotes: this.generateConversionNotes(analysis),
+        transformationMetadata: {
+          complexity: analysis.complexity,
+          requiresManualReview: this.requiresManualReview(analysis),
+          strategy: analysis.conversionStrategy,
+          generatedUtilityFunction: analysis.conversionStrategy === 'pageObject' ? this.generatePageObjectClass(analysis) : undefined
+        }
+      };
 
-      this.logger.info('Custom command conversion completed: SUCCESS');
+      this.logger.info(`Custom command conversion completed: ${result.conversionSuccess ? 'SUCCESS' : 'FAILED'}`);
       return result;
 
     } catch (error) {
-      this.logger.error('Custom command conversion failed:', error);
-      return this.createErrorResult(`Conversion failed: ${error instanceof Error ? error.message : String(error)}`);
+      this.logger.error('Error converting custom commands:', error);
+      return this.createFailureResult(cypressCode, `Conversion error: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
-  private convertLoginCommand(args: string[]): CustomCommandConversionResult {
-    const playwrightEquivalent = `// TODO: Convert custom command cy.login() to Playwright equivalent
-async function login(page: Page, username: string, password: string) {
-  await page.getByRole('textbox', { name: /username|email/i }).fill(username);
-  await page.getByRole('textbox', { name: /password/i }).fill(password);
-  await page.getByRole('button', { name: /login|sign in/i }).click();
-}`;
+  private analyzeCustomCommands(code: string): CustomCommandAnalysis {
+    // Extract all custom command calls
+    const customCommands = this.extractCustomCommands(code);
 
-    return {
-      isValid: true,
-      playwrightEquivalent,
-      conversionSuccess: true,
-      transformationMetadata: {
-        strategy: 'utility',
-        complexity: 'medium',
-        notes: ['Login function requires implementation based on specific UI elements']
-      }
-    };
-  }
-
-  private convertSelectDropdownCommand(args: string[]): CustomCommandConversionResult {
-    const [selector, value] = args;
-    const cleanSelector = this.cleanQuotes(selector);
-    const cleanValue = this.cleanQuotes(value);
-
-    const playwrightEquivalent = `await page.locator('${cleanSelector}').selectOption('${cleanValue}');`;
-
-    return {
-      isValid: true,
-      playwrightEquivalent,
-      conversionSuccess: true,
-      transformationMetadata: {
-        strategy: 'direct',
+    if (customCommands.length === 0) {
+      return {
+        commandName: 'unknown',
+        parameters: [],
+        isChainable: false,
+        hasPlaywrightEquivalent: false,
+        conversionStrategy: 'manual',
         complexity: 'low'
-      }
-    };
-  }
-
-  private convertUploadFileCommand(args: string[]): CustomCommandConversionResult {
-    const [selector, fileName] = args;
-    const cleanSelector = this.cleanQuotes(selector);
-    const cleanFileName = this.cleanQuotes(fileName);
-
-    const playwrightEquivalent = `await page.locator('${cleanSelector}').setInputFiles('${cleanFileName}');`;
-
-    return {
-      isValid: true,
-      playwrightEquivalent,
-      conversionSuccess: true,
-      transformationMetadata: {
-        strategy: 'direct',
-        complexity: 'low'
-      }
-    };
-  }
-
-  private convertCustomThenCommand(cypressCode: string): CustomCommandConversionResult {
-    // Extract the callback function content
-    const callbackMatch = cypressCode.match(/cy\.customThen\(\(\) => \{([\s\S]*?)\}\)/);
-    if (!callbackMatch) {
-      return this.createErrorResult('Unable to parse customThen callback');
+      };
     }
 
-    const callbackContent = callbackMatch[1];
-    let playwrightCode = '// Custom then logic converted to async function\n';
+    // Analyze the primary command (first one found)
+    const primaryCommand = customCommands[0];
+    const commandInfo = this.knownCommandMappings.get(primaryCommand.name);
 
-    // Convert Cypress commands in the callback to Playwright
-    const lines = callbackContent.trim().split('\n');
-    for (const line of lines) {
-      const trimmedLine = line.trim();
-      if (trimmedLine.includes("cy.get") && trimmedLine.includes("should('be.visible')")) {
-        const selectorMatch = trimmedLine.match(/cy\.get\(['"](.*?)['"]\)\.should\('be\.visible'\)/);
-        if (selectorMatch) {
-          playwrightCode += `await expect(page.locator('${selectorMatch[1]}')).toBeVisible();\n`;
-        }
-      } else if (trimmedLine.includes("cy.get") && trimmedLine.includes(".click()")) {
-        const selectorMatch = trimmedLine.match(/cy\.get\(['"](.*?)['"]\)\.click\(\)/);
-        if (selectorMatch) {
-          playwrightCode += `await page.locator('${selectorMatch[1]}').click();\n`;
-        }
-      }
+    // Determine if commands are chainable
+    const isChainable = /cy\.\w+\([^)]*\)\.\w+\(/.test(code);
+
+    // Determine overall strategy based on all commands
+    const strategy = this.determineOverallStrategy(customCommands);
+
+    // Determine complexity based on number and types of commands
+    let complexity: 'low' | 'medium' | 'high' = 'low';
+    if (customCommands.length > 3 || strategy === 'pageObject') {
+      complexity = 'high';
+    } else if (customCommands.length > 1 || strategy === 'utility') {
+      complexity = 'medium';
     }
 
     return {
-      isValid: true,
-      playwrightEquivalent: playwrightCode,
-      conversionSuccess: true,
-      transformationMetadata: {
-        strategy: 'utility',
-        complexity: 'medium',
-        notes: ['CustomThen converted to async function with Playwright commands']
-      }
+      commandName: primaryCommand.name,
+      parameters: primaryCommand.parameters,
+      isChainable,
+      hasPlaywrightEquivalent: commandInfo ? true : false,
+      conversionStrategy: strategy,
+      complexity
     };
   }
 
-  private convertCustomLogCommand(args: string[]): CustomCommandConversionResult {
-    const formattedArgs = args.map(arg => {
-      // Handle object literals
-      if (arg.trim().startsWith('{') && arg.trim().endsWith('}')) {
-        return arg;
+  private extractCustomCommands(code: string): Array<{ name: string, parameters: any[] }> {
+    const commands: Array<{ name: string, parameters: any[] }> = [];
+
+    // Pattern to match cy.customCommand() calls
+    const customCommandPattern = /cy\.(\w+)\(([^)]*)\)/g;
+    let match;
+
+    while ((match = customCommandPattern.exec(code)) !== null) {
+      const commandName = match[1];
+      const paramString = match[2];
+
+      // Skip standard Cypress commands
+      const standardCommands = [
+        'get', 'visit', 'click', 'type', 'should', 'expect', 'contains',
+        'wait', 'intercept', 'then', 'and', 'wrap', 'as', 'its', 'invoke',
+        'clear', 'check', 'uncheck', 'select', 'focus', 'blur', 'submit',
+        'reload', 'go', 'url', 'title', 'window', 'document', 'log'
+      ];
+
+      if (!standardCommands.includes(commandName)) {
+        const parameters = this.parseParameters(paramString);
+        commands.push({ name: commandName, parameters });
       }
-      return `'${this.cleanQuotes(arg)}'`;
-    }).join(', ');
+    }
 
-    const playwrightEquivalent = `console.log(${formattedArgs});`;
-
-    return {
-      isValid: true,
-      playwrightEquivalent,
-      conversionSuccess: true,
-      transformationMetadata: {
-        strategy: 'direct',
-        complexity: 'low'
-      }
-    };
+    return commands;
   }
 
-  private convertNavigateToSectionCommand(args: string[]): CustomCommandConversionResult {
-    const [section, subsection] = args.map(arg => this.cleanQuotes(arg));
-
-    const playwrightEquivalent = `// TODO: Convert custom navigation command
-await page.getByRole('navigation').getByText('${section}').click();
-await page.getByRole('link', { name: '${subsection}' }).click();`;
-
-    return {
-      isValid: true,
-      playwrightEquivalent,
-      conversionSuccess: true,
-      transformationMetadata: {
-        strategy: 'utility',
-        complexity: 'medium',
-        notes: ['Navigation implementation may need adjustment based on actual UI structure']
-      }
-    };
-  }
-
-  private convertFillLoginFormCommand(args: string[]): CustomCommandConversionResult {
-    const [email, password] = args.map(arg => this.cleanQuotes(arg));
-
-    const playwrightEquivalent = `// Convert to page object method
-export class LoginPage {
-  constructor(private page: Page) {}
-
-  async fillLoginForm(email: string, password: string) {
-    await this.page.getByRole('textbox', { name: /email/i }).fill(email);
-    await this.page.getByRole('textbox', { name: /password/i }).fill(password);
-  }
-}`;
-
-    return {
-      isValid: true,
-      playwrightEquivalent,
-      conversionSuccess: true,
-      transformationMetadata: {
-        strategy: 'pageobject',
-        complexity: 'medium',
-        notes: ['Converted to page object method pattern for better maintainability']
-      }
-    };
-  }
-
-  private convertGenericCustomCommand(commandName: string, args: string[]): CustomCommandConversionResult {
-    const playwrightEquivalent = `// TODO: Convert custom command cy.${commandName}() to Playwright equivalent
-// Parameters: ${args.join(', ')}
-// This custom command requires manual implementation`;
-
-    return {
-      isValid: true,
-      playwrightEquivalent,
-      conversionSuccess: true,
-      transformationMetadata: {
-        strategy: 'utility',
-        complexity: 'high',
-        notes: [`Generic custom command ${commandName} requires manual implementation`]
-      },
-      warnings: [`Custom command ${commandName} needs manual conversion`]
-    };
-  }
-
-  private parseArguments(argsString: string): string[] {
-    if (!argsString.trim()) {
+  private parseParameters(paramString: string): any[] {
+    if (!paramString.trim()) {
       return [];
     }
 
-    const args: string[] = [];
-    let current = '';
-    let inQuotes = false;
-    let quoteChar = '';
-    let braceDepth = 0;
-    let parenDepth = 0;
+    try {
+      // Simple parameter parsing - this could be enhanced with AST parsing
+      const params = paramString.split(',').map(param => {
+        const trimmed = param.trim();
 
-    for (let i = 0; i < argsString.length; i++) {
-      const char = argsString[i];
-
-      if (!inQuotes) {
-        if (char === '"' || char === "'") {
-          inQuotes = true;
-          quoteChar = char;
-        } else if (char === '{') {
-          braceDepth++;
-        } else if (char === '}') {
-          braceDepth--;
-        } else if (char === '(') {
-          parenDepth++;
-        } else if (char === ')') {
-          parenDepth--;
-        } else if (char === ',' && braceDepth === 0 && parenDepth === 0) {
-          args.push(current.trim());
-          current = '';
-          continue;
+        // Try to determine parameter type
+        if (trimmed.startsWith("'") || trimmed.startsWith('"')) {
+          return { name: 'string', type: 'string' };
+        } else if (/^\d+$/.test(trimmed)) {
+          return { name: 'number', type: 'number' };
+        } else if (trimmed === 'true' || trimmed === 'false') {
+          return { name: 'boolean', type: 'boolean' };
+        } else if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+          return { name: 'object', type: 'object' };
+        } else {
+          return { name: 'unknown', type: 'any' };
         }
-      } else if (char === quoteChar) {
-        inQuotes = false;
-        quoteChar = '';
+      });
+
+      return params;
+    } catch (error) {
+      return [{ name: 'unknown', type: 'any' }];
+    }
+  }
+
+  private determineOverallStrategy(commands: Array<{ name: string, parameters: any[] }>): 'direct' | 'utility' | 'pageObject' | 'manual' {
+    // Check if any commands require page object strategy
+    const pageObjectCommands = ['fillLoginForm', 'submitLoginForm', 'openModal', 'fillModalForm', 'saveModal', 'closeModal'];
+    if (commands.some(cmd => pageObjectCommands.includes(cmd.name))) {
+      return 'pageObject';
+    }
+
+    // Check if any commands require manual conversion
+    const manualCommands = ['clearCookies', 'clearLocalStorage', 'setCookie', 'customDragAndDrop'];
+    if (commands.some(cmd => manualCommands.includes(cmd.name))) {
+      return 'manual';
+    }
+
+    // Check if direct conversion is possible
+    const directCommands = ['selectDropdown', 'uploadFile', 'customLog', 'clickButton'];
+    if (commands.every(cmd => directCommands.includes(cmd.name))) {
+      return 'direct';
+    }
+
+    // Default to utility functions
+    return 'utility';
+  }
+
+  private transformCustomCommands(code: string, analysis: CustomCommandAnalysis): string {
+    let convertedCode = code;
+
+    switch (analysis.conversionStrategy) {
+      case 'direct':
+        convertedCode = this.convertDirectCommands(convertedCode);
+        break;
+      case 'utility':
+        convertedCode = this.convertToUtilityFunctions(convertedCode);
+        break;
+      case 'pageObject':
+        convertedCode = this.convertToPageObjectMethods(convertedCode);
+        break;
+      case 'manual':
+        convertedCode = this.addManualConversionComments(convertedCode);
+        break;
+    }
+
+    return convertedCode;
+  }
+
+  private convertDirectCommands(code: string): string {
+    let result = code;
+
+    // Convert specific known direct mappings
+    result = result.replace(/cy\.selectDropdown\(['"`]([^'"`]+)['"`],\s*['"`]([^'"`]+)['"`]\)/g,
+      "await page.locator('$1').selectOption('$2');");
+
+    result = result.replace(/cy\.uploadFile\(['"`]([^'"`]+)['"`],\s*['"`]([^'"`]+)['"`]\)/g,
+      "await page.locator('$1').setInputFiles('$2');");
+
+    result = result.replace(/cy\.customLog\(([^)]+)\)/g, 'console.log($1);');
+
+    result = result.replace(/cy\.clickButton\(['"`]([^'"`]+)['"`]\)/g,
+      "await page.locator('$1').click();");
+
+    return result;
+  }
+
+  private convertToUtilityFunctions(code: string): string {
+    let result = code;
+
+    // Convert login command
+    result = result.replace(/cy\.login\(['"`]([^'"`]+)['"`],\s*['"`]([^'"`]+)['"`]\)/g, (match, username, password) => {
+      return `// TODO: Convert custom command cy.login() to Playwright equivalent
+async function login(page: Page, username: string, password: string) {
+  // Implement login logic here
+  await page.locator('[data-testid="username"]').fill(username);
+  await page.locator('[data-testid="password"]').fill(password);
+  await page.locator('[data-testid="login-btn"]').click();
+}
+
+await login(page, '${username}', '${password}');`;
+    });
+
+    // Convert navigateToSection command
+    result = result.replace(/cy\.navigateToSection\(['"`]([^'"`]+)['"`],\s*['"`]([^'"`]+)['"`]\)/g, (match, section, subsection) => {
+      return `async function navigateToSection(page: Page, section: string, subsection: string) {
+  await page.goto(\`/\${section}/\${subsection}\`);
+}
+
+await navigateToSection(page, '${section}', '${subsection}');`;
+    });
+
+    // Convert conditional click
+    result = result.replace(/cy\.conditionalClick\(['"`]([^'"`]+)['"`],\s*['"`]([^'"`]+)['"`]\)/g, (match, selector, condition) => {
+      return `async function conditionalClick(page: Page, selector: string, condition: string) {
+  if (condition === 'visible' && await page.locator(selector).isVisible()) {
+    await page.locator(selector).click();
+  }
+}
+
+await conditionalClick(page, '${selector}', '${condition}');`;
+    });
+
+    // Convert waitForElement with options
+    result = result.replace(/cy\.waitForElement\(['"`]([^'"`]+)['"`],\s*\{([^}]+)\}\)/g, (match, selector, options) => {
+      return `async function waitForElement(page: Page, selector: string, options?: { timeout?: number, retries?: number }) {
+  await page.locator(selector).waitFor({ timeout: options?.timeout || 30000 });
+}
+
+await waitForElement(page, '${selector}', {${options}});`;
+    });
+
+    // Convert chained commands to sequential calls
+    result = result.replace(/cy\.(\w+)\([^)]*\)\.(\w+)\([^)]*\)\.(\w+)\([^)]*\)/g, (match) => {
+      const commands = match.split('.').slice(1); // Remove 'cy' prefix
+      return commands.map(cmd => `await ${cmd.replace(/^(\w+)/, '$1(page')}`).join(';\n');
+    });
+
+    // Handle getApiData and similar async operations
+    result = result.replace(/cy\.getApiData\(['"`]([^'"`]+)['"`]\)\.as\(['"`]([^'"`]+)['"`]\)/g, (match, url, alias) => {
+      return `const ${alias} = await getApiData(page, '${url}');`;
+    });
+
+    result = result.replace(/cy\.get\(['"`]@([^'"`]+)['"`]\)\.then\(\(([^)]+)\)\s*=>\s*\{([^}]+)\}\)/g, (match, alias, param, body) => {
+      const convertedBody = body.replace(new RegExp(`\\b${param}\\b`, 'g'), alias);
+      return convertedBody;
+    });
+
+    return result;
+  }
+
+  private convertToPageObjectMethods(code: string): string {
+    const commands = this.extractCustomCommands(code);
+
+    // Determine page object name based on commands
+    let pageObjectName = 'LoginPage';
+    if (commands.some(cmd => cmd.name.includes('Modal'))) {
+      pageObjectName = 'ModalPage';
+    }
+
+    // Generate page object class
+    const pageObjectClass = this.generatePageObjectFromCommands(commands, pageObjectName);
+
+    // Convert individual command calls
+    let result = code;
+    commands.forEach(cmd => {
+      const methodCall = `await ${cmd.name}(${cmd.parameters.map((_, i) => `param${i}`).join(', ')})`;
+      result = result.replace(new RegExp(`cy\\.${cmd.name}\\([^)]*\\)`, 'g'), methodCall);
+    });
+
+    return `${pageObjectClass}\n\n${result}`;
+  }
+
+  private generatePageObjectFromCommands(commands: Array<{ name: string, parameters: any[] }>, className: string): string {
+    const methods = commands.map(cmd => {
+      const paramList = cmd.parameters.map((param, i) => `param${i}: ${param.type}`).join(', ');
+      return `  async ${cmd.name}(${paramList}) {
+    // TODO: Implement ${cmd.name} logic
+  }`;
+    }).join('\n\n');
+
+    return `class ${className} {
+  constructor(private page: Page) {}
+
+${methods}
+}`;
+  }
+
+  private addManualConversionComments(code: string): string {
+    let result = code;
+
+    // Browser management commands
+    result = result.replace(/cy\.clearCookies\(\)/g,
+      '// TODO: Browser cookie/storage management\nawait page.context().clearCookies();');
+
+    result = result.replace(/cy\.clearLocalStorage\(\)/g,
+      'await page.evaluate(() => localStorage.clear());');
+
+    result = result.replace(/cy\.setCookie\(['"`]([^'"`]+)['"`],\s*['"`]([^'"`]+)['"`]\)/g,
+      "await page.context().addCookies([{ name: '$1', value: '$2', url: page.url() }]);");
+
+    // Drag and drop
+    result = result.replace(/cy\.customDragAndDrop\(['"`]([^'"`]+)['"`],\s*['"`]([^'"`]+)['"`]\)/g,
+      '// TODO: Implement drag and drop using Playwright\nawait page.locator(\'$1\').dragTo(page.locator(\'$2\'));');
+
+    // Unknown commands
+    result = result.replace(/cy\.(\w+)\(([^)]*)\)/g, (match, commandName, params) => {
+      if (!this.knownCommandMappings.has(commandName)) {
+        return `// TODO: Unknown custom command - requires manual conversion\n// ${match}`;
+      }
+      return match;
+    });
+
+    return result;
+  }
+
+  private generatePageObjectClass(analysis: CustomCommandAnalysis): string {
+    if (analysis.conversionStrategy !== 'pageObject') {
+      return '';
+    }
+
+    return `// Generated Page Object Class
+class ${this.getPageObjectClassName(analysis.commandName)} {
+  constructor(private page: Page) {}
+
+  // TODO: Implement page object methods
+}`;
+  }
+
+  private getPageObjectClassName(commandName: string): string {
+    if (commandName.includes('login') || commandName.includes('Login')) {
+      return 'LoginPage';
+    } else if (commandName.includes('modal') || commandName.includes('Modal')) {
+      return 'ModalPage';
+    } else {
+      return 'CustomPage';
+    }
+  }
+
+  private requiresManualReview(analysis: CustomCommandAnalysis): boolean {
+    return analysis.conversionStrategy === 'manual' ||
+           analysis.complexity === 'high' ||
+           !analysis.hasPlaywrightEquivalent;
+  }
+
+  private generateConversionNotes(analysis: CustomCommandAnalysis): string[] {
+    const notes: string[] = [];
+
+    if (analysis.conversionStrategy === 'direct') {
+      notes.push('Direct command conversion applied');
+    } else if (analysis.conversionStrategy === 'utility') {
+      notes.push('Converted to utility functions');
+    } else if (analysis.conversionStrategy === 'pageObject') {
+      notes.push('Converted to page object methods');
+      notes.push('Generated page object class requires implementation');
+    } else if (analysis.conversionStrategy === 'manual') {
+      notes.push('Manual conversion required');
+    }
+
+    if (!analysis.hasPlaywrightEquivalent) {
+      notes.push(`Unknown custom command detected: ${analysis.commandName}`);
+    }
+
+    if (analysis.isChainable) {
+      notes.push('Chainable commands converted to sequential async calls');
+    }
+
+    if (analysis.complexity === 'high') {
+      notes.push('Complex command pattern - review implementation carefully');
+    }
+
+    // Add specific notes for known challenging patterns
+    if (analysis.commandName.includes('drag') || analysis.commandName.includes('Drop')) {
+      notes.push('Drag and drop operations require manual conversion to Playwright API');
+    }
+
+    if (analysis.commandName.includes('Test') || analysis.commandName.includes('setup')) {
+      notes.push('Test data setup requires manual implementation');
+    }
+
+    if (analysis.commandName.includes('validation') || analysis.commandName.includes('Validation')) {
+      notes.push('Complex validation logic should be converted to utility functions');
+    }
+
+    if (analysis.parameters.length > 3) {
+      notes.push('Multiple custom commands detected');
+    }
+
+    return notes;
+  }
+
+  private validateGeneratedCode(code: string): boolean {
+    try {
+      // Basic syntax validation using TypeScript parser
+      const sourceFile = ts.createSourceFile(
+        'temp.ts',
+        code,
+        ts.ScriptTarget.Latest,
+        true
+      );
+
+      // Check for syntax errors by examining the AST structure
+      let hasErrors = false;
+
+      function visit(node: ts.Node): void {
+        if (node.kind === ts.SyntaxKind.Unknown) {
+          hasErrors = true;
+        }
+        ts.forEachChild(node, visit);
       }
 
-      current += char;
+      visit(sourceFile);
+      return !hasErrors;
+    } catch (error) {
+      this.logger.error('Syntax validation failed:', error);
+      return false;
     }
-
-    if (current.trim()) {
-      args.push(current.trim());
-    }
-
-    return args;
   }
 
-  private cleanQuotes(str: string): string {
-    return str.replace(/^['"]|['"]$/g, '');
-  }
-
-  private createErrorResult(message: string): CustomCommandConversionResult {
+  private createFailureResult(originalCode: string, errorMessage: string): ConvertedCustomCommand {
     return {
+      originalCommand: originalCode,
+      playwrightEquivalent: `// CONVERSION FAILED: ${errorMessage}\n${originalCode}`,
       isValid: false,
-      playwrightEquivalent: `// Error: ${message}`,
       conversionSuccess: false,
+      conversionNotes: [errorMessage],
       transformationMetadata: {
-        strategy: 'utility',
-        complexity: 'high'
-      },
-      errors: [message]
+        complexity: 'high',
+        requiresManualReview: true,
+        strategy: 'manual'
+      }
     };
   }
 }

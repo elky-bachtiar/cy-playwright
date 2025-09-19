@@ -1,445 +1,451 @@
+import * as ts from 'typescript';
 import { Logger } from '../utils/logger';
-
-export interface ThenPatternAnalysisResult {
-  isValid: boolean;
-  playwrightPattern: string;
-  conversionSuccess: boolean;
-  complexity: 'low' | 'medium' | 'high';
-  transformationMetadata: {
-    strategy: 'simple' | 'complex' | 'nested' | 'error';
-    notes: string[];
-    warnings?: string[];
-  };
-  originalPattern: string;
-}
+import {
+  ThenPatternAnalysis,
+  ConvertedThenPattern
+} from '../types/pattern-conversion';
 
 export class ThenPatternTransformer {
-  private logger: Logger;
+  private logger = new Logger('ThenPatternTransformer');
 
-  constructor() {
-    this.logger = new Logger('ThenPatternTransformer');
-  }
+  private readonly cypressToPlaywrightMappings = {
+    'cy.get': 'page.locator',
+    'cy.visit': 'page.goto',
+    'cy.url': 'page.url',
+    'cy.reload': 'page.reload',
+    'cy.wait': 'page.waitForResponse',
+    'cy.request': 'page.request.get',
+    'cy.intercept': 'page.route',
+    'cy.window': 'page.evaluate',
+    'cy.log': 'console.log'
+  };
 
-  /**
-   * Convert Cypress .then() patterns to Playwright async/await
-   */
-  convertThenPattern(cypressCode: string): ThenPatternAnalysisResult {
+  private readonly jqueryMethods = [
+    'val', 'text', 'html', 'attr', 'prop', 'addClass', 'removeClass',
+    'hasClass', 'show', 'hide', 'toggle', 'focus', 'blur', 'submit',
+    'trigger', 'on', 'off', 'slider', 'datepicker', 'autocomplete'
+  ];
+
+  public convertThenPattern(cypressCode: string): ConvertedThenPattern {
     this.logger.info('Converting cy.then() pattern to async/await');
 
     try {
-      const trimmedCode = cypressCode.trim();
+      // Analyze the pattern first
+      const analysis = this.analyzeThenPattern(cypressCode);
 
-      // Handle different then pattern structures
-      if (this.isSimpleThenPattern(trimmedCode)) {
-        return this.convertSimpleThenPattern(trimmedCode);
-      } else if (this.isComplexThenPattern(trimmedCode)) {
-        return this.convertComplexThenPattern(trimmedCode);
-      } else if (this.isNestedThenPattern(trimmedCode)) {
-        return this.convertNestedThenPattern(trimmedCode);
-      } else if (this.isChainedThenPattern(trimmedCode)) {
-        return this.convertChainedThenPattern(trimmedCode);
-      } else {
-        return this.convertGenericThenPattern(trimmedCode);
+      if (!analysis.hasThenCallback) {
+        return this.createFailureResult(cypressCode, 'No cy.then() pattern detected');
       }
+
+      // Convert the pattern
+      const playwrightCode = this.transformToAsyncAwait(cypressCode, analysis);
+      this.logger.debug('Original code:', cypressCode);
+      this.logger.debug('Converted code:', playwrightCode);
+
+      // Validate the generated code
+      const isValid = this.validateGeneratedCode(playwrightCode);
+
+      const result: ConvertedThenPattern = {
+        originalPattern: cypressCode,
+        playwrightPattern: playwrightCode,
+        isValid,
+        conversionSuccess: isValid,
+        conversionNotes: this.generateConversionNotes(analysis),
+        transformationMetadata: {
+          complexity: analysis.complexity,
+          requiresManualReview: analysis.usesJQueryMethods || analysis.usesCustomCommands,
+          nestingLevel: this.calculateNestingLevel(cypressCode),
+          estimatedConversionTime: this.estimateConversionTime(analysis)
+        }
+      };
+
+      this.logger.info(`Conversion completed: ${result.conversionSuccess ? 'SUCCESS' : 'FAILED'}`);
+      return result;
 
     } catch (error) {
-      this.logger.error('Then pattern conversion failed:', error);
-      return this.createErrorResult(cypressCode, `Conversion failed: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      this.logger.info('Conversion completed: SUCCESS');
+      this.logger.error('Error converting cy.then() pattern:', error);
+      return this.createFailureResult(cypressCode, `Conversion error: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
-  private isSimpleThenPattern(code: string): boolean {
-    return /cy\.\w+\([^)]*\)\.then\(\s*\([^)]*\)\s*=>\s*\{[^{}]*\}\s*\)/.test(code);
-  }
+  private analyzeThenPattern(code: string): ThenPatternAnalysis {
+    const hasThenCallback = /\.then\s*\(\s*\([^)]*\)\s*=>\s*\{/.test(code);
+    const isNested = (code.match(/\.then\(/g) || []).length > 1;
 
-  private isComplexThenPattern(code: string): boolean {
-    return /cy\.\w+\([^)]*\)\.then\(\s*\([^)]*\)\s*=>\s*\{[\s\S]*?cy\.\w+/.test(code);
-  }
+    // Extract callback parameter and body
+    const thenMatch = code.match(/\.then\s*\(\s*\(([^)]*)\)\s*=>\s*\{([\s\S]*)\}\s*\)/);
+    const callbackParameter = thenMatch ? thenMatch[1].trim() : '';
+    const callbackBody = thenMatch ? thenMatch[2] : '';
 
-  private isNestedThenPattern(code: string): boolean {
-    return /cy\.then\([\s\S]*cy\.then\(/.test(code);
-  }
+    // Detect chained operations
+    const chainedOperations = this.extractChainedOperations(code);
 
-  private isChainedThenPattern(code: string): boolean {
-    return /\.then\([^}]*\)\.then\(/.test(code);
-  }
+    // Check for jQuery methods
+    const usesJQueryMethods = this.jqueryMethods.some(method =>
+      new RegExp(`\\$\\w+\\.${method}\\(`).test(code)
+    );
 
-  private convertSimpleThenPattern(code: string): ThenPatternAnalysisResult {
-    // Extract parts of simple then pattern
-    const match = code.match(/cy\.(\w+)\(([^)]*)\)\.then\(\s*\(([^)]*)\)\s*=>\s*\{([^{}]*)\}\s*\)/);
+    // Check for custom commands
+    const usesCustomCommands = /cy\.\w+\(.*\)(?!\.(?:get|visit|url|wait|request|intercept|window|then|should|and|contains|click|type|clear|check|uncheck|select))/.test(code);
 
-    if (!match) {
-      return this.createErrorResult(code, 'Unable to parse simple then pattern');
+    // Check for conditional logic
+    const hasConditionalLogic = /\b(if|else|switch|case|for|while)\s*\(/.test(callbackBody);
+
+    // Determine complexity
+    let complexity: 'low' | 'medium' | 'high' = 'low';
+    if (isNested || hasConditionalLogic || usesJQueryMethods) {
+      complexity = 'high';
+    } else if (usesCustomCommands || chainedOperations.length > 2) {
+      complexity = 'medium';
     }
-
-    const [, command, args, param, body] = match;
-
-    // Convert based on the command type
-    let playwrightCode = '';
-    let elementVariable = '';
-
-    switch (command) {
-      case 'get':
-        elementVariable = this.generateVariableName(param);
-        const selector = args.replace(/['"]/g, '');
-        playwrightCode = `const ${elementVariable} = page.locator('${selector}');\n`;
-        break;
-      case 'url':
-        elementVariable = 'url';
-        playwrightCode = `const url = page.url();\n`;
-        break;
-      case 'contains':
-        elementVariable = this.generateVariableName(param);
-        const text = args.replace(/['"]/g, '');
-        playwrightCode = `const ${elementVariable} = page.getByText('${text}');\n`;
-        break;
-      default:
-        elementVariable = 'result';
-        playwrightCode = `const result = await page.${command}(${args});\n`;
-    }
-
-    // Convert the body
-    const convertedBody = this.convertThenBody(body.trim(), elementVariable, param);
-    playwrightCode += convertedBody;
 
     return {
-      isValid: true,
-      playwrightPattern: playwrightCode,
-      conversionSuccess: true,
-      complexity: 'low',
-      transformationMetadata: {
-        strategy: 'simple',
-        notes: [`Converted simple cy.${command}().then() to async/await pattern`]
-      },
-      originalPattern: code
+      hasThenCallback,
+      isNested,
+      callbackParameter,
+      callbackBody,
+      chainedOperations,
+      complexity,
+      usesJQueryMethods,
+      usesCustomCommands,
+      hasConditionalLogic
     };
   }
 
-  private convertComplexThenPattern(code: string): ThenPatternAnalysisResult {
-    // Handle complex patterns with multiple Cypress commands inside then()
-    const match = code.match(/cy\.(\w+)\(([^)]*)\)\.then\(\s*\(([^)]*)\)\s*=>\s*\{([\s\S]*)\}\s*\)/);
+  private extractChainedOperations(code: string): string[] {
+    const operations: string[] = [];
+    const chainPattern = /cy\.[a-zA-Z]+\([^)]*\)/g;
+    let match;
 
-    if (!match) {
-      return this.createErrorResult(code, 'Unable to parse complex then pattern');
+    while ((match = chainPattern.exec(code)) !== null) {
+      operations.push(match[0]);
     }
 
-    const [, command, args, param, body] = match;
-
-    let playwrightCode = '';
-    let elementVariable = this.generateVariableName(param);
-
-    // Set up base locator/value
-    if (command === 'get') {
-      const selector = args.replace(/['"]/g, '');
-      playwrightCode = `const ${elementVariable} = page.locator('${selector}');\n`;
-    } else if (command === 'url') {
-      elementVariable = 'url';
-      playwrightCode = `const url = page.url();\n`;
-    } else if (command === 'intercept') {
-      // Handle intercept patterns
-      playwrightCode = this.convertInterceptThenPattern(code);
-      return {
-        isValid: true,
-        playwrightPattern: playwrightCode,
-        conversionSuccess: true,
-        complexity: 'high',
-        transformationMetadata: {
-          strategy: 'complex',
-          notes: ['Converted cy.intercept().then() to Playwright route handling']
-        },
-        originalPattern: code
-      };
-    }
-
-    // Convert the complex body
-    const convertedBody = this.convertComplexThenBody(body, elementVariable, param);
-    playwrightCode += convertedBody;
-
-    return {
-      isValid: true,
-      playwrightPattern: playwrightCode,
-      conversionSuccess: true,
-      complexity: 'medium',
-      transformationMetadata: {
-        strategy: 'complex',
-        notes: [`Converted complex cy.${command}().then() with multiple operations`]
-      },
-      originalPattern: code
-    };
+    return operations;
   }
 
-  private convertNestedThenPattern(code: string): ThenPatternAnalysisResult {
-    // Handle nested cy.then() patterns
-    let playwrightCode = '// Nested then patterns converted to sequential async operations\n';
+  private transformToAsyncAwait(code: string, analysis: ThenPatternAnalysis): string {
+    let convertedCode = code;
 
-    // Find all then blocks and convert them sequentially
-    const thenBlocks = this.extractNestedThenBlocks(code);
+    // Convert assertions first
+    convertedCode = this.convertAssertions(convertedCode);
 
-    for (let i = 0; i < thenBlocks.length; i++) {
-      const block = thenBlocks[i];
-      const blockResult = this.convertSimpleThenPattern(block);
+    // Convert simple cy.get().then() patterns
+    convertedCode = convertedCode.replace(
+      /cy\.get\(['"`]([^'"`]+)['"`]\)\.then\s*\(\s*\(([^)]+)\)\s*=>\s*\{([\s\S]*?)\}\s*\);?/g,
+      (match, selector, param, body) => {
+        const locatorName = this.generateLocatorVariableName(param);
+        let convertedBody = body.trim();
 
-      if (blockResult.conversionSuccess) {
-        playwrightCode += `\n// Then block ${i + 1}\n`;
-        playwrightCode += blockResult.playwrightPattern;
-      } else {
-        playwrightCode += `\n// TODO: Convert nested then block ${i + 1}\n`;
-        playwrightCode += `// ${block}\n`;
+        // Replace parameter references in the body
+        convertedBody = convertedBody.replace(new RegExp(`\\b${param}\\b`, 'g'), locatorName);
+
+        return `const ${locatorName} = page.locator('${selector}');\n${convertedBody}`;
+      }
+    );
+
+    // Convert other patterns if needed
+    convertedCode = this.convertCypressCommands(convertedCode);
+
+    if (analysis.usesJQueryMethods) {
+      convertedCode = this.convertJQueryMethods(convertedCode);
+    }
+
+    if (analysis.usesCustomCommands) {
+      convertedCode = this.handleCustomCommands(convertedCode);
+    }
+
+    return convertedCode;
+  }
+
+  private handleSimpleThenPattern(code: string): string {
+    // Handle cy.get().then() pattern specifically
+    const getPattern = /cy\.get\(['"`]([^'"`]+)['"`]\)\.then\s*\(\s*\(([^)]+)\)\s*=>\s*\{([\s\S]*?)\}\s*\)/g;
+
+    let result = code.replace(getPattern, (match, selector, param, body) => {
+      const locatorName = this.generateLocatorVariableName(param);
+      const convertedBody = this.convertCallbackBody(body.trim(), param, locatorName);
+
+      return `const ${locatorName} = page.locator('${selector}');\n${convertedBody}`;
+    });
+
+    return result;
+  }
+
+  private handleNestedThenPatterns(code: string): string {
+    // Handle nested .then() patterns by flattening them
+    let result = code;
+    let nestingLevel = 0;
+    const locatorDeclarations: string[] = [];
+
+    // Extract all cy.get() calls and create locator variables
+    const getCallPattern = /cy\.get\(['"`]([^'"`]+)['"`]\)/g;
+    let match;
+    const selectors: string[] = [];
+
+    while ((match = getCallPattern.exec(code)) !== null) {
+      selectors.push(match[1]);
+    }
+
+    // Generate locator declarations
+    selectors.forEach((selector, index) => {
+      const locatorName = `element${index + 1}`;
+      locatorDeclarations.push(`const ${locatorName} = page.locator('${selector}');`);
+    });
+
+    // Extract and flatten all .then() callback bodies
+    const thenBodies: string[] = [];
+    const thenPattern = /\.then\s*\(\s*\([^)]*\)\s*=>\s*\{([\s\S]*?)\}\s*\)/g;
+
+    while ((match = thenPattern.exec(code)) !== null) {
+      const body = match[1].trim();
+      if (body) {
+        thenBodies.push(this.convertCallbackBody(body, `$el${nestingLevel}`, `element${nestingLevel + 1}`));
+        nestingLevel++;
       }
     }
 
-    return {
-      isValid: true,
-      playwrightPattern: playwrightCode,
-      conversionSuccess: true,
-      complexity: 'high',
-      transformationMetadata: {
-        strategy: 'nested',
-        notes: ['Converted nested cy.then() patterns to sequential async operations'],
-        warnings: ['Nested then patterns may require manual review for correctness']
-      },
-      originalPattern: code
-    };
+    // Combine locator declarations with flattened bodies
+    result = locatorDeclarations.join('\n') + '\n\n' + thenBodies.join('\n');
+
+    return result;
   }
 
-  private convertChainedThenPattern(code: string): ThenPatternAnalysisResult {
-    // Handle chained .then() calls
-    const thenChain = code.split('.then(').slice(1); // Skip the first part before .then
-    let playwrightCode = '';
+  private convertCallbackBody(body: string, originalParam: string, locatorName: string): string {
+    let convertedBody = body.trim();
 
-    // Extract initial command
-    const initialMatch = code.match(/^([^.]+)\./);
-    if (initialMatch) {
-      const initialCommand = initialMatch[1];
-      if (initialCommand.startsWith('cy.url()')) {
-        playwrightCode += 'const url = page.url();\n';
-      } else {
-        playwrightCode += `const result = ${this.convertCypressCommand(initialCommand)};\n`;
+    // Replace parameter references with locator variable
+    const paramPattern = new RegExp(`\\b${originalParam}\\b`, 'g');
+    convertedBody = convertedBody.replace(paramPattern, locatorName);
+
+    // Convert common jQuery methods
+    convertedBody = convertedBody.replace(/\.val\(['"`]([^'"`]*)['"`]\)/g, '.fill(\'$1\')');
+    convertedBody = convertedBody.replace(/\.click\(\)/g, '.click()');
+    convertedBody = convertedBody.replace(/\.text\(\)/g, '.textContent()');
+    convertedBody = convertedBody.replace(/\.is\(['"`]:visible['"`]\)/g, '.isVisible()');
+
+    // Convert expect statements - handle the substituted parameter
+    convertedBody = convertedBody.replace(/expect\(([^)]+)\)\.to\.be\.visible/g, `await expect(${locatorName}).toBeVisible()`);
+
+    // Add await keywords where needed
+    convertedBody = this.addAwaitKeywords(convertedBody);
+
+    return convertedBody;
+  }
+
+  private convertCypressCommands(code: string): string {
+    let result = code;
+
+    // Convert cy.url() patterns
+    result = result.replace(/cy\.url\(\)\.then\s*\(\s*\(([^)]+)\)\s*=>\s*\{([\s\S]*?)\}\s*\)/g, (match, param, body) => {
+      const convertedBody = body.replace(new RegExp(`\\b${param}\\b`, 'g'), 'url');
+      return `const url = page.url();\n${convertedBody}`;
+    });
+
+    // Convert cy.wait() patterns
+    result = result.replace(/cy\.wait\(['"`]@([^'"`]+)['"`]\)\.then\s*\(\s*\(([^)]+)\)\s*=>\s*\{([\s\S]*?)\}\s*\)/g, (match, alias, param, body) => {
+      const convertedBody = body
+        .replace(new RegExp(`${param}\\.response\\.body`, 'g'), 'responseBody')
+        .replace(new RegExp(`${param}`, 'g'), 'interception');
+
+      return `const interception = await page.waitForResponse(response => response.url().includes('${alias}'));\nconst responseBody = await interception.json();\n${convertedBody}`;
+    });
+
+    // Convert cy.request() patterns
+    result = result.replace(/cy\.request\(['"`]([^'"`]+)['"`]\)\.then\s*\(\s*\(([^)]+)\)\s*=>\s*\{([\s\S]*?)\}\s*\)/g, (match, url, param, body) => {
+      const convertedBody = body.replace(new RegExp(`${param}\\.body`, 'g'), 'responseBody');
+      return `const response = await page.request.get('${url}');\nconst responseBody = await response.json();\n${convertedBody}`;
+    });
+
+    // Convert cy.window() patterns
+    result = result.replace(/cy\.window\(\)\.then\s*\(\s*\(([^)]+)\)\s*=>\s*\{([\s\S]*?)\}\s*\)/g, (match, param, body) => {
+      const convertedBody = body.replace(new RegExp(`${param}\\.localStorage`, 'g'), 'localStorage');
+      return `await page.evaluate(() => {\n${convertedBody}\n});`;
+    });
+
+    return result;
+  }
+
+  private convertJQueryMethods(code: string): string {
+    let result = code;
+
+    // Convert jQuery method calls to Playwright equivalents
+    this.jqueryMethods.forEach(method => {
+      switch (method) {
+        case 'val':
+          result = result.replace(/\$\w+\.val\(['"`]([^'"`]*)['"`]\)/g, 'await locator.fill(\'$1\')');
+          break;
+        case 'click':
+          result = result.replace(/\$\w+\.click\(\)/g, 'await locator.click()');
+          break;
+        case 'text':
+          result = result.replace(/\$\w+\.text\(\)/g, 'await locator.textContent()');
+          break;
+        case 'trigger':
+          result = result.replace(/\$\w+\.trigger\(['"`]([^'"`]+)['"`]\)/g, 'await locator.dispatchEvent(\'$1\')');
+          break;
+        case 'submit':
+          result = result.replace(/\$\w+\.submit\(\)/g, 'await locator.submit()');
+          break;
+        default:
+          // For unsupported jQuery methods, add TODO comment
+          const unsupportedPattern = new RegExp('\\$\\w+\\.' + method + '\\([^)]*\\)', 'g');
+          result = result.replace(unsupportedPattern, (match) => {
+            return `// TODO: Convert jQuery ${method}() method to Playwright equivalent\n${match}`;
+          });
       }
-    }
+    });
 
-    // Convert each chained then
-    for (let i = 0; i < thenChain.length; i++) {
-      const thenPart = '.then(' + thenChain[i];
-      const match = thenPart.match(/\.then\(\s*\(([^)]*)\)\s*=>\s*\{([^}]*)\}\s*\)/);
+    return result;
+  }
 
-      if (match) {
-        const [, param, body] = match;
-        const convertedBody = this.convertThenBody(body, 'result', param);
-        playwrightCode += `\n// Chained then ${i + 1}\n`;
-        playwrightCode += convertedBody;
+  private handleCustomCommands(code: string): string {
+    // Detect custom commands and add TODO comments
+    const customCommandPattern = /cy\.(\w+)\(/g;
+    const standardCommands = ['get', 'visit', 'url', 'wait', 'request', 'intercept', 'window', 'then', 'should', 'and', 'contains', 'click', 'type', 'clear', 'check', 'uncheck', 'select', 'log'];
+
+    return code.replace(customCommandPattern, (match, commandName) => {
+      if (!standardCommands.includes(commandName)) {
+        return `// TODO: Convert custom command cy.${commandName}() to Playwright equivalent\n${match}`;
       }
-    }
-
-    return {
-      isValid: true,
-      playwrightPattern: playwrightCode,
-      conversionSuccess: true,
-      complexity: 'medium',
-      transformationMetadata: {
-        strategy: 'complex',
-        notes: ['Converted chained .then() calls to sequential operations']
-      },
-      originalPattern: code
-    };
+      return match;
+    });
   }
 
-  private convertGenericThenPattern(code: string): ThenPatternAnalysisResult {
-    // Fallback for any then pattern we can't specifically categorize
-    const playwrightCode = `// Generic then pattern conversion
-${code}
-// TODO: Convert this then pattern manually to async/await`;
+  private convertAssertions(code: string): string {
+    let result = code;
 
-    return {
-      isValid: true,
-      playwrightPattern: playwrightCode,
-      conversionSuccess: true,
-      complexity: 'high',
-      transformationMetadata: {
-        strategy: 'error',
-        notes: ['Generic then pattern requires manual conversion'],
-        warnings: ['This pattern could not be automatically converted']
-      },
-      originalPattern: code
-    };
+    // Convert Cypress assertions to Playwright expect
+    result = result.replace(/\.should\(['"`]be\.visible['"`]\)/g, 'await expect(locator).toBeVisible()');
+    result = result.replace(/\.should\(['"`]contain\.text['"`],\s*['"`]([^'"`]+)['"`]\)/g, 'await expect(locator).toContainText(\'$1\')');
+    result = result.replace(/\.should\(['"`]have\.value['"`],\s*['"`]([^'"`]+)['"`]\)/g, 'await expect(locator).toHaveValue(\'$1\')');
+    result = result.replace(/expect\(([^)]+)\)\.to\.be\.visible/g, 'await expect($1).toBeVisible()');
+    result = result.replace(/expect\(([^)]+)\)\.to\.include\(['"`]([^'"`]+)['"`]\)/g, 'await expect(page).toHaveURL(/.*$2.*/);');
+
+    // Convert cy.log to console.log
+    result = result.replace(/cy\.log\(/g, 'console.log(');
+
+    return result;
   }
 
-  private convertThenBody(body: string, elementVariable: string, originalParam: string): string {
-    let converted = body;
+  private addAwaitKeywords(code: string): string {
+    let result = code;
 
-    // Replace parameter references with the element variable
-    const paramRegex = new RegExp(`\\b${originalParam}\\b`, 'g');
+    // Add await to Playwright method calls that need it
+    const awaitPatterns = [
+      /(\b(?:page|locator)\.[a-zA-Z]+\([^)]*\))/g,
+      /(\bexpect\([^)]+\)\.[a-zA-Z]+\([^)]*\))/g
+    ];
 
-    // Handle specific Cypress expectations in then body
-    if (converted.includes('expect(')) {
-      // Convert Cypress expect to Playwright expect
-      converted = converted.replace(/expect\(([^)]+)\)\.to\.be\.visible/g,
-        `await expect(${elementVariable}).toBeVisible()`);
-      converted = converted.replace(/expect\(([^)]+)\)\.to\.contain\.text\(([^)]+)\)/g,
-        `await expect(${elementVariable}).toContainText($2)`);
-    } else if (converted.includes('.should(')) {
-      // Convert should assertions
-      converted = converted.replace(/\$\w+\.should\(['"]be\.visible['"]\)/g,
-        `await expect(${elementVariable}).toBeVisible()`);
-    } else {
-      // Simple parameter replacement
-      converted = converted.replace(paramRegex, elementVariable);
-    }
-
-    // Add await to any async operations
-    if (!converted.includes('await') && (converted.includes('expect(') || converted.includes('.to'))) {
-      // Add await to the beginning if it's an assertion
-      const lines = converted.split('\n');
-      converted = lines.map(line => {
-        const trimmed = line.trim();
-        if (trimmed.startsWith('expect(') || trimmed.includes('.toBeVisible') || trimmed.includes('.toContain')) {
-          return trimmed.startsWith('await') ? line : line.replace(trimmed, `await ${trimmed}`);
+    awaitPatterns.forEach(pattern => {
+      result = result.replace(pattern, (match) => {
+        if (!match.includes('await ')) {
+          return `await ${match}`;
         }
-        return line;
-      }).join('\n');
-    }
+        return match;
+      });
+    });
 
-    return converted + '\n';
+    return result;
   }
 
-  private convertComplexThenBody(body: string, elementVariable: string, originalParam: string): string {
-    const lines = body.split('\n').map(line => line.trim()).filter(line => line);
-    let converted = '';
+  private generateLocatorVariableName(parameter: string): string {
+    // Generate meaningful variable names based on the callback parameter
+    const cleaned = parameter.replace(/\$/, '').toLowerCase();
 
-    for (const line of lines) {
-      if (line.startsWith('cy.')) {
-        // Convert Cypress commands within the then body
-        converted += this.convertCypressCommandInThen(line) + '\n';
-      } else if (line.includes('expect(')) {
-        // Convert expect statements
-        let expectLine = line.replace(new RegExp(`\\b${originalParam}\\b`, 'g'), elementVariable);
-        if (!expectLine.startsWith('await')) {
-          expectLine = 'await ' + expectLine;
+    const nameMap: { [key: string]: string } = {
+      'btn': 'button',
+      'el': 'element',
+      'input': 'input',
+      'form': 'form',
+      'modal': 'modal',
+      'link': 'link'
+    };
+
+    return nameMap[cleaned] || 'element';
+  }
+
+  private calculateNestingLevel(code: string): number {
+    const thenMatches = code.match(/\.then\(/g);
+    return thenMatches ? thenMatches.length : 0;
+  }
+
+  private estimateConversionTime(analysis: ThenPatternAnalysis): number {
+    let baseTime = 5; // 5 seconds for simple patterns
+
+    if (analysis.isNested) baseTime += 10;
+    if (analysis.usesJQueryMethods) baseTime += 15;
+    if (analysis.usesCustomCommands) baseTime += 20;
+    if (analysis.hasConditionalLogic) baseTime += 10;
+
+    return baseTime;
+  }
+
+  private generateConversionNotes(analysis: ThenPatternAnalysis): string[] {
+    const notes: string[] = [];
+
+    if (analysis.isNested) {
+      notes.push('Converted nested cy.then() patterns to sequential async/await operations');
+    }
+
+    if (analysis.usesJQueryMethods) {
+      notes.push('jQuery methods detected - some may require manual conversion');
+    }
+
+    if (analysis.usesCustomCommands) {
+      notes.push('Custom commands detected - may require additional conversion');
+    }
+
+    if (analysis.hasConditionalLogic) {
+      notes.push('Conditional logic preserved in async/await conversion');
+    }
+
+    notes.push(`Converted ${analysis.chainedOperations.length} chained operations to Playwright syntax`);
+
+    return notes;
+  }
+
+  private validateGeneratedCode(code: string): boolean {
+    try {
+      // Basic syntax validation using TypeScript parser
+      const sourceFile = ts.createSourceFile(
+        'temp.ts',
+        code,
+        ts.ScriptTarget.Latest,
+        true
+      );
+
+      // Check for syntax errors by examining the AST structure
+      let hasErrors = false;
+
+      function visit(node: ts.Node): void {
+        if (node.kind === ts.SyntaxKind.Unknown) {
+          hasErrors = true;
         }
-        converted += expectLine + '\n';
-      } else {
-        // Regular JavaScript - replace parameter references
-        const jsLine = line.replace(new RegExp(`\\b${originalParam}\\b`, 'g'), elementVariable);
-        converted += jsLine + '\n';
+        ts.forEachChild(node, visit);
       }
-    }
 
-    return converted;
+      visit(sourceFile);
+      return !hasErrors;
+    } catch (error) {
+      this.logger.error('Syntax validation failed:', error);
+      return false;
+    }
   }
 
-  private convertCypressCommandInThen(line: string): string {
-    // Convert common Cypress commands found inside then blocks
-    if (line.includes("cy.get(") && line.includes(".should('be.visible')")) {
-      const selectorMatch = line.match(/cy\.get\(([^)]+)\)\.should\('be\.visible'\)/);
-      if (selectorMatch) {
-        return `await expect(page.locator(${selectorMatch[1]})).toBeVisible();`;
-      }
-    }
-
-    if (line.includes("cy.get(") && line.includes(".click()")) {
-      const selectorMatch = line.match(/cy\.get\(([^)]+)\)\.click\(\)/);
-      if (selectorMatch) {
-        return `await page.locator(${selectorMatch[1]}).click();`;
-      }
-    }
-
-    if (line.includes("cy.visit(")) {
-      const urlMatch = line.match(/cy\.visit\(([^)]+)\)/);
-      if (urlMatch) {
-        return `await page.goto(${urlMatch[1]});`;
-      }
-    }
-
-    // Default: add TODO comment
-    return `// TODO: Convert ${line}`;
-  }
-
-  private convertInterceptThenPattern(code: string): string {
-    const match = code.match(/cy\.intercept\(([^)]+)\)\.as\(([^)]+)\)[\s\S]*cy\.wait\(([^)]+)\)\.then\(([^}]+)\}/);
-
-    if (match) {
-      const [, interceptArgs, alias, waitAlias, thenBody] = match;
-
-      return `await page.route('**/*', async route => {
-  await route.continue();
-});
-
-const response = await page.waitForResponse(response => response.url().includes('${alias.replace(/['"@]/g, '')}'));
-const responseBody = await response.json();
-${thenBody.replace(/interception/g, 'responseBody')};`;
-    }
-
-    return '// TODO: Convert intercept then pattern';
-  }
-
-  private extractNestedThenBlocks(code: string): string[] {
-    const blocks: string[] = [];
-    let depth = 0;
-    let currentBlock = '';
-    let inThen = false;
-
-    for (let i = 0; i < code.length; i++) {
-      const char = code[i];
-
-      if (code.substr(i, 5) === '.then') {
-        inThen = true;
-        currentBlock = '';
-      }
-
-      if (inThen) {
-        currentBlock += char;
-
-        if (char === '{') depth++;
-        if (char === '}') depth--;
-
-        if (depth === 0 && char === '}') {
-          blocks.push(currentBlock);
-          currentBlock = '';
-          inThen = false;
-        }
-      }
-    }
-
-    return blocks.filter(block => block.trim().length > 0);
-  }
-
-  private convertCypressCommand(command: string): string {
-    if (command.includes('cy.url()')) {
-      return 'page.url()';
-    }
-    if (command.includes('cy.get(')) {
-      const match = command.match(/cy\.get\(([^)]+)\)/);
-      if (match) {
-        return `page.locator(${match[1]})`;
-      }
-    }
-    return command;
-  }
-
-  private generateVariableName(param: string): string {
-    if (!param || param === '$el' || param === '$element') {
-      return 'locator';
-    }
-
-    // Remove $ prefix if present and clean up
-    const cleaned = param.replace(/^\$/, '').replace(/[^a-zA-Z0-9]/g, '');
-    return cleaned || 'element';
-  }
-
-  private createErrorResult(code: string, message: string): ThenPatternAnalysisResult {
+  private createFailureResult(originalCode: string, errorMessage: string): ConvertedThenPattern {
     return {
+      originalPattern: originalCode,
+      playwrightPattern: `// CONVERSION FAILED: ${errorMessage}\n${originalCode}`,
       isValid: false,
-      playwrightPattern: `// Error converting then pattern: ${message}\n// Original: ${code}`,
       conversionSuccess: false,
-      complexity: 'high',
+      conversionNotes: [errorMessage],
       transformationMetadata: {
-        strategy: 'error',
-        notes: [message],
-        warnings: ['Manual conversion required']
-      },
-      originalPattern: code
+        complexity: 'high',
+        requiresManualReview: true,
+        nestingLevel: 0,
+        estimatedConversionTime: 0
+      }
     };
   }
 }

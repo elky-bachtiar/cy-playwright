@@ -84,6 +84,14 @@ These are the tasks to be completed for the spec detailed in @.agent-os/specs/20
    - Validate method functionality is preserved
    - Ensure page objects work in converted test files
 
+**Known Issues from E2E Testing (anton-kravchenko/cypress-page-object-example):**
+- Complex page object method chaining conversion incomplete
+- Page object files not converted from Cypress to Playwright syntax
+- Custom selector decorators (@By.Text.Exact, @By.Class) not handled
+- Method chaining patterns (.goToLoginPage().login()) not preserved
+- Context blocks not converted to Playwright test blocks
+- Cypress assertions (.should()) not converted to Playwright expect()
+- Page object imports reference unconverted files (../pages/ still contains Cypress syntax)
 ### Task 3: Complex Test Pattern Conversion Engine ✅
 
 **Objective**: Properly convert advanced Cypress patterns including cy.then(), cy.wait(), custom commands, and complex assertion chains.

@@ -6,8 +6,7 @@ import { CIMigrationAnalyzer } from '../../src/validation/ci-migration-analyzer'
 import * as fs from 'fs-extra';
 
 // Mock dependencies
-jest.mock('fs-extra');
-const mockFs = {
+jest.mock('fs-extra', () => ({
   pathExists: jest.fn(),
   readdir: jest.fn(),
   readFile: jest.fn(),
@@ -15,7 +14,9 @@ const mockFs = {
   ensureDir: jest.fn(),
   copy: jest.fn(),
   remove: jest.fn()
-};
+}));
+
+const mockFs = fs as jest.Mocked<typeof fs>;
 
 describe('Conversion Reporting Test Suite', () => {
   let reportingValidator: ConversionReportingValidator;

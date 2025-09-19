@@ -47,6 +47,12 @@ describe('GitHub Actions Conversion', () => {
 
     // Setup default yaml.dump behavior
     mockYaml.dump.mockReturnValue(mockPlaywrightWorkflowYaml);
+
+    // Setup default fs.readdirSync behavior
+    mockFs.readdirSync.mockReturnValue([
+      'test.yml' as any,
+      'build.yaml' as any
+    ]);
   });
 
   const mockCypressWorkflow = `

@@ -52,7 +52,7 @@ describe('GitHubRepository', () => {
           expected: {
             owner: 'helenanull',
             repo: 'cypress-example',
-            branch: 'master'
+            branch: 'main'
           }
         },
         {
@@ -60,7 +60,7 @@ describe('GitHubRepository', () => {
           expected: {
             owner: 'cypress-io',
             repo: 'cypress-example-kitchensink',
-            branch: 'master'
+            branch: 'main'
           }
         }
       ]

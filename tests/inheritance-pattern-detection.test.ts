@@ -1,447 +1,514 @@
-import { describe, test, expect, beforeEach, jest } from '@jest/globals';
-import { InheritancePatternDetector, InheritancePattern } from '../src/services/inheritance-pattern-detector';
+import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
 import * as fs from 'fs-extra';
+import { PageObjectAnalyzer } from '../src/services/page-object-analyzer';
 
-// Mock fs-extra
+// Mock file system operations
 jest.mock('fs-extra');
-const mockReadFile = fs.readFile as jest.MockedFunction<any>;
+const mockFs = fs as jest.Mocked<typeof fs>;
+const mockReadFile = mockFs.readFile as jest.MockedFunction<typeof fs.readFile>;
 
-describe('InheritancePatternDetector', () => {
-  let detector: InheritancePatternDetector;
+describe('PageObjectAnalyzer - Inheritance Pattern Detection', () => {
+  let analyzer: PageObjectAnalyzer;
+  const testFilePath = '/test/inheritance-page.ts';
 
   beforeEach(() => {
-    detector = new InheritancePatternDetector();
+    analyzer = new PageObjectAnalyzer();
     jest.clearAllMocks();
   });
 
-  describe('Abstract Class Detection', () => {
-    test('should detect abstract class patterns', async () => {
-      // Arrange
-      const abstractPageContent = `
-        abstract class BasePage {
-          protected page: any;
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
 
-          constructor(page: any) {
-            this.page = page;
-          }
+  describe('Abstract Base Class Patterns', () => {
+    test('should detect abstract base class with protected methods', async () => {
+      const abstractPageContent = `abstract class BasePage {
+  protected abstract getPageUrl(): string;
+  protected abstract getPageTitle(): string;
 
-          abstract navigate(): void;
+  visit() {
+    cy.visit(this.getPageUrl());
+  }
 
-          protected waitForElement(selector: string) {
-            return this.page.waitForSelector(selector);
-          }
-        }
+  protected waitForLoad() {
+    cy.get('[data-testid="spinner"]').should('not.exist');
+  }
 
-        class LoginPage extends BasePage {
-          navigate() {
-            return this.page.goto('/login');
-          }
-        }
-      `;
+  verifyPageTitle() {
+    cy.title().should('contain', this.getPageTitle());
+  }
+}`;
 
-      mockReadFile.mockResolvedValue(abstractPageContent);
+      mockReadFile.mockResolvedValue(abstractPageContent as any);
 
-      // Act
-      const result = await detector.analyzeInheritancePatterns('/test/file.ts');
+      const result = await analyzer.analyzePageObject(testFilePath);
 
-      // Assert
-      expect(result.patterns).toHaveLength(2); // Abstract + inheritance
+      expect(result.isPageObject).toBe(true);
+      expect(result.className).toBe('BasePage');
+      expect(result.methods).toHaveLength(3);
+      expect(result.methods.map(m => m.name)).toEqual(['visit', 'waitForLoad', 'verifyPageTitle']);
+      expect(result.methods.some(m => m.body.includes('this.getPageUrl()'))).toBe(true);
+      expect(result.methods.some(m => m.body.includes('this.getPageTitle()'))).toBe(true);
+    });
 
-      const abstractPattern = result.patterns.find(p => p.type === 'abstract');
-      expect(abstractPattern).toBeDefined();
-      expect(abstractPattern?.baseClass).toBe('BasePage');
-      expect(abstractPattern?.methods).toContain('waitForElement');
-      expect(abstractPattern?.complexity).toBe('medium');
-      expect(abstractPattern?.playwrightConversion.strategy).toContain('Convert to Playwright base page class');
+    test('should detect inheritance chain with extends keyword', async () => {
+      const inheritanceContent = `abstract class BasePage {
+  protected abstract getPageUrl(): string;
+
+  visit() {
+    cy.visit(this.getPageUrl());
+  }
+}
+
+class LoginPage extends BasePage {
+  protected getPageUrl(): string {
+    return '/login';
+  }
+
+  fillEmail(email: string) {
+    cy.get('[data-testid="email"]').type(email);
+  }
+
+  fillPassword(password: string) {
+    cy.get('[data-testid="password"]').type(password);
+  }
+
+  clickSubmit() {
+    cy.get('[data-testid="submit"]').click();
+  }
+}`;
+
+      mockReadFile.mockResolvedValue(inheritanceContent as any);
+
+      const result = await analyzer.analyzePageObject(testFilePath);
+
+      expect(result.isPageObject).toBe(true);
+      expect(result.className).toBe('LoginPage'); // Should detect the concrete class
+      expect(result.methods).toHaveLength(4);
+      expect(result.methods.map(m => m.name)).toEqual(['getPageUrl', 'fillEmail', 'fillPassword', 'clickSubmit']);
+    });
+
+    test('should detect multiple inheritance levels', async () => {
+      const multiLevelContent = `abstract class BasePage {
+  visit() {
+    cy.visit(this.getUrl());
+  }
+  abstract getUrl(): string;
+}
+
+abstract class FormPage extends BasePage {
+  protected fillField(selector: string, value: string) {
+    cy.get(selector).clear().type(value);
+  }
+
+  protected clickButton(selector: string) {
+    cy.get(selector).click();
+  }
+}
+
+class LoginFormPage extends FormPage {
+  getUrl(): string {
+    return '/login';
+  }
+
+  fillCredentials(email: string, password: string) {
+    this.fillField('[data-testid="email"]', email);
+    this.fillField('[data-testid="password"]', password);
+  }
+
+  submit() {
+    this.clickButton('[data-testid="submit"]');
+  }
+}`;
+
+      mockReadFile.mockResolvedValue(multiLevelContent as any);
+
+      const result = await analyzer.analyzePageObject(testFilePath);
+
+      expect(result.isPageObject).toBe(true);
+      expect(result.className).toBe('LoginFormPage'); // Should detect the most concrete class
+      expect(result.methods).toHaveLength(3);
+      expect(result.methods.some(m => m.callsOtherMethods)).toBe(true);
+      expect(result.methods.find(m => m.name === 'fillCredentials')?.calledMethods).toContain('fillField');
+      expect(result.methods.find(m => m.name === 'submit')?.calledMethods).toContain('clickButton');
     });
   });
 
-  describe('Simple Inheritance Detection', () => {
-    test('should detect basic inheritance patterns', async () => {
-      // Arrange
-      const inheritanceContent = `
-        class BasePage {
-          constructor(page) {
-            this.page = page;
-          }
+  describe('Mixin and Interface Patterns', () => {
+    test('should detect mixin pattern with multiple concerns', async () => {
+      const mixinContent = `interface Loggable {
+  log(message: string): void;
+}
 
-          async clickButton(selector) {
-            await this.page.click(selector);
-          }
-        }
+interface Mockable {
+  setupMocks(): Promise<void>;
+}
 
-        class LoginPage extends BasePage {
-          async login(username, password) {
-            await this.clickButton('#login-btn');
-          }
-        }
-      `;
+class BasePage implements Loggable, Mockable {
+  log(message: string): void {
+    cy.log(message);
+  }
 
-      mockReadFile.mockResolvedValue(inheritanceContent);
+  async setupMocks(): Promise<void> {
+    cy.intercept('GET', '/api/data', { fixture: 'data.json' });
+  }
 
-      // Act
-      const result = await detector.analyzeInheritancePatterns('/test/file.ts');
+  visit(url: string) {
+    cy.visit(url);
+  }
+}
 
-      // Assert
-      expect(result.patterns).toHaveLength(1);
+class LoginPage extends BasePage {
+  visit() {
+    super.visit('/login');
+    this.log('Visiting login page');
+  }
 
-      const pattern = result.patterns[0];
-      expect(pattern.type).toBe('inheritance');
-      expect(pattern.baseClass).toBe('BasePage');
-      expect(pattern.derivedClasses).toContain('LoginPage');
-      expect(pattern.methods).toContain('login');
-      expect(pattern.complexity).toBe('medium');
+  fillForm(email: string, password: string) {
+    cy.get('[data-testid="email"]').type(email);
+    cy.get('[data-testid="password"]').type(password);
+  }
+}`;
+
+      mockReadFile.mockResolvedValue(mixinContent as any);
+
+      const result = await analyzer.analyzePageObject(testFilePath);
+
+      expect(result.isPageObject).toBe(true);
+      expect(result.className).toBe('LoginPage');
+      expect(result.methods).toHaveLength(2);
+      expect(result.methods.some(m => m.body.includes('super.visit'))).toBe(true);
+      expect(result.methods.some(m => m.body.includes('this.log'))).toBe(true);
+    });
+
+    test('should detect composition over inheritance pattern', async () => {
+      const compositionContent = `class NavigationHelper {
+  goToHome() {
+    cy.get('[data-testid="home-link"]').click();
+  }
+
+  goToProfile() {
+    cy.get('[data-testid="profile-link"]').click();
+  }
+}
+
+class FormHelper {
+  fillInput(selector: string, value: string) {
+    cy.get(selector).clear().type(value);
+  }
+
+  clickButton(selector: string) {
+    cy.get(selector).click();
+  }
+}
+
+class ComplexPage {
+  private navigation = new NavigationHelper();
+  private form = new FormHelper();
+
+  visit() {
+    cy.visit('/complex');
+  }
+
+  navigateToProfile() {
+    this.navigation.goToProfile();
+  }
+
+  fillLoginForm(email: string, password: string) {
+    this.form.fillInput('[data-testid="email"]', email);
+    this.form.fillInput('[data-testid="password"]', password);
+    this.form.clickButton('[data-testid="submit"]');
+  }
+}`;
+
+      mockReadFile.mockResolvedValue(compositionContent as any);
+
+      const result = await analyzer.analyzePageObject(testFilePath);
+
+      expect(result.isPageObject).toBe(true);
+      expect(result.className).toBe('ComplexPage');
+      expect(result.properties).toHaveLength(2);
+      expect(result.properties.map(p => p.name)).toEqual(['navigation', 'form']);
+      expect(result.methods).toHaveLength(3);
+      expect(result.methods.some(m => m.body.includes('this.navigation.'))).toBe(true);
+      expect(result.methods.some(m => m.body.includes('this.form.'))).toBe(true);
     });
   });
 
-  describe('Multi-level Inheritance Detection', () => {
-    test('should detect multi-level inheritance chains', async () => {
-      // Arrange
-      const multiLevelContent = `
-        class BasePage {
-          constructor(page) { this.page = page; }
-        }
+  describe('Static Method and Utility Patterns', () => {
+    test('should detect static utility methods', async () => {
+      const staticMethodContent = `class PageUtilities {
+  static waitForElementToDisappear(selector: string) {
+    cy.get(selector).should('not.exist');
+  }
 
-        class FormPage extends BasePage {
-          async fillForm() { /* implementation */ }
-        }
+  static waitForPageLoad() {
+    cy.get('[data-testid="loading"]').should('not.exist');
+    cy.get('body').should('be.visible');
+  }
 
-        class LoginFormPage extends FormPage {
-          async submitLogin() { /* implementation */ }
-        }
-      `;
+  visit() {
+    cy.visit('/utilities');
+    PageUtilities.waitForPageLoad();
+  }
 
-      mockReadFile.mockResolvedValue(multiLevelContent);
+  performAction() {
+    cy.get('[data-testid="action"]').click();
+    PageUtilities.waitForElementToDisappear('[data-testid="modal"]');
+  }
+}`;
 
-      // Act
-      const result = await detector.analyzeInheritancePatterns('/test/file.ts');
+      mockReadFile.mockResolvedValue(staticMethodContent as any);
 
-      // Assert
-      expect(result.patterns).toHaveLength(2); // Two inheritance relationships
+      const result = await analyzer.analyzePageObject(testFilePath);
 
-      const patterns = result.patterns.filter(p => p.type === 'inheritance');
-      expect(patterns).toHaveLength(2);
-      expect(patterns.some(p => p.baseClass === 'BasePage' && p.derivedClasses.includes('FormPage'))).toBe(true);
-      expect(patterns.some(p => p.baseClass === 'FormPage' && p.derivedClasses.includes('LoginFormPage'))).toBe(true);
+      expect(result.isPageObject).toBe(true);
+      expect(result.className).toBe('PageUtilities');
+      expect(result.methods).toHaveLength(4);
+      expect(result.methods.filter(m => m.name.startsWith('waitFor'))).toHaveLength(2);
+      expect(result.methods.some(m => m.body.includes('PageUtilities.waitForPageLoad()'))).toBe(true);
+      expect(result.methods.some(m => m.body.includes('PageUtilities.waitForElementToDisappear'))).toBe(true);
+    });
+
+    test('should detect generic type parameters', async () => {
+      const genericContent = `interface PageData<T> {
+  data: T;
+}
+
+class GenericPage<T> implements PageData<T> {
+  data: T;
+
+  constructor(data: T) {
+    this.data = data;
+  }
+
+  visit() {
+    cy.visit('/generic');
+  }
+
+  handleData(processor: (data: T) => void) {
+    processor(this.data);
+    cy.log('Data processed');
+  }
+
+  fillForm(formData: Partial<T>) {
+    cy.get('[data-testid="form"]').within(() => {
+      Object.keys(formData).forEach(key => {
+        cy.get(\`[data-testid="\${key}"]\`).type(String(formData[key as keyof T]));
+      });
+    });
+  }
+}
+
+class UserPage extends GenericPage<{name: string, email: string}> {
+  fillUserForm(name: string, email: string) {
+    this.fillForm({ name, email });
+  }
+}`;
+
+      mockReadFile.mockResolvedValue(genericContent as any);
+
+      const result = await analyzer.analyzePageObject(testFilePath);
+
+      expect(result.isPageObject).toBe(true);
+      expect(result.className).toBe('UserPage');
+      expect(result.hasConstructor).toBe(false); // UserPage doesn't have explicit constructor
+      expect(result.methods).toHaveLength(1);
+      expect(result.methods[0].name).toBe('fillUserForm');
+      expect(result.methods[0].callsOtherMethods).toBe(true);
+      expect(result.methods[0].calledMethods).toContain('fillForm');
     });
   });
 
-  describe('Mixin Pattern Detection', () => {
-    test('should detect mixin patterns', async () => {
-      // Arrange
-      const mixinContent = `
-        class BasePage {
-          constructor(page) { this.page = page; }
-        }
+  describe('Getter and Setter Patterns', () => {
+    test('should detect ES6 getter and setter methods', async () => {
+      const getterSetterContent = `class PropertyPage {
+  private _currentUrl: string = '';
+  private _isLoaded: boolean = false;
 
-        const ClickableMixin = {
-          click: function(selector) {
-            return this.page.click(selector);
-          }
-        };
+  visit() {
+    cy.visit('/property');
+  }
 
-        Object.assign(BasePage.prototype, ClickableMixin);
-      `;
-
-      mockReadFile.mockResolvedValue(mixinContent);
-
-      // Act
-      const result = await detector.analyzeInheritancePatterns('/test/file.ts');
-
-      // Assert
-      expect(result.patterns).toHaveLength(1);
-
-      const pattern = result.patterns[0];
-      expect(pattern.type).toBe('mixin');
-      expect(pattern.baseClass).toBe('BasePage');
-      expect(pattern.derivedClasses).toContain('ClickableMixin');
-      expect(pattern.complexity).toBe('high');
-      expect(pattern.playwrightConversion.strategy).toContain('Convert mixins to composition pattern');
+  get currentUrl(): string {
+    cy.url().then(url => {
+      this._currentUrl = url;
     });
-  });
+    return this._currentUrl;
+  }
 
-  describe('Composition Pattern Detection', () => {
-    test('should detect composition patterns', async () => {
-      // Arrange
-      const compositionContent = `
-        class LoginPage {
-          constructor(page) {
-            this.page = page;
-            this.formHelper = new FormHelper(page);
-            this.navigationHelper = new NavigationHelper(page);
-          }
+  set searchTerm(term: string) {
+    cy.get('[data-testid="search"]').clear().type(term);
+  }
 
-          async login(username, password) {
-            await this.formHelper.fillForm({ username, password });
-            await this.navigationHelper.goTo('/dashboard');
-          }
-        }
-
-        class FormHelper {
-          constructor(page) { this.page = page; }
-          async fillForm(data) { /* implementation */ }
-        }
-      `;
-
-      mockReadFile.mockResolvedValue(compositionContent);
-
-      // Act
-      const result = await detector.analyzeInheritancePatterns('/test/file.ts');
-
-      // Assert
-      expect(result.patterns).toHaveLength(2); // Two composition relationships
-
-      const patterns = result.patterns.filter(p => p.type === 'composition');
-      expect(patterns).toHaveLength(2);
-      expect(patterns.some(p => p.derivedClasses.includes('FormHelper'))).toBe(true);
-      expect(patterns.some(p => p.derivedClasses.includes('NavigationHelper'))).toBe(true);
+  get isPageLoaded(): boolean {
+    cy.get('[data-testid="content"]').should('be.visible').then(() => {
+      this._isLoaded = true;
     });
-  });
+    return this._isLoaded;
+  }
 
-  describe('Static Method Detection', () => {
-    test('should detect static method patterns', async () => {
-      // Arrange
-      const staticMethodContent = `
-        class TestUtils {
-          static async waitForCondition(condition, timeout = 5000) {
-            // implementation
-          }
+  get headerText() {
+    return cy.get('[data-testid="header"]').invoke('text');
+  }
+}`;
 
-          static generateTestData() {
-            return { id: Math.random() };
-          }
+      mockReadFile.mockResolvedValue(getterSetterContent as any);
 
-          static async cleanup() {
-            // cleanup implementation
-          }
-        }
-      `;
+      const result = await analyzer.analyzePageObject(testFilePath);
 
-      mockReadFile.mockResolvedValue(staticMethodContent);
-
-      // Act
-      const result = await detector.analyzeInheritancePatterns('/test/file.ts');
-
-      // Assert
-      expect(result.patterns).toHaveLength(1);
-
-      const pattern = result.patterns[0];
-      expect(pattern.type).toBe('static');
-      expect(pattern.baseClass).toBe('StaticUtilities');
-      expect(pattern.methods).toContain('waitForCondition');
-      expect(pattern.methods).toContain('generateTestData');
-      expect(pattern.methods).toContain('cleanup');
-      expect(pattern.complexity).toBe('low');
+      expect(result.isPageObject).toBe(true);
+      expect(result.className).toBe('PropertyPage');
+      expect(result.properties).toHaveLength(2);
+      expect(result.properties.map(p => p.name)).toEqual(['_currentUrl', '_isLoaded']);
+      expect(result.methods).toHaveLength(5);
+      expect(result.methods.map(m => m.name)).toEqual(['visit', 'currentUrl', 'searchTerm', 'isPageLoaded', 'headerText']);
     });
-  });
 
-  describe('Generic Class Detection', () => {
-    test('should detect generic class patterns', async () => {
-      // Arrange
-      const genericContent = `
-        class Repository<T> {
-          private items: T[] = [];
-
-          constructor(private page: any) {}
-
-          async add(item: T): Promise<void> {
-            this.items.push(item);
-          }
-
-          async findById(id: string): Promise<T | undefined> {
-            return this.items.find(item => (item as any).id === id);
-          }
-        }
-
-        interface User {
-          id: string;
-          name: string;
-        }
-
-        const userRepo = new Repository<User>(page);
-      `;
-
-      mockReadFile.mockResolvedValue(genericContent);
-
-      // Act
-      const result = await detector.analyzeInheritancePatterns('/test/file.ts');
-
-      // Assert
-      expect(result.patterns).toHaveLength(1);
-
-      const pattern = result.patterns[0];
-      expect(pattern.type).toBe('generic');
-      expect(pattern.baseClass).toBe('Repository');
-      expect(pattern.methods).toContain('add');
-      expect(pattern.methods).toContain('findById');
-      expect(pattern.complexity).toBe('medium');
-    });
-  });
-
-  describe('Property Descriptor Detection', () => {
     test('should detect property descriptor patterns', async () => {
-      // Arrange
-      const getterSetterContent = `
-        class PageObject {
-          constructor(page) {
-            this.page = page;
-          }
-        }
+      const descriptorContent = `class DescriptorPage {
+  visit() {
+    cy.visit('/descriptor');
+  }
 
-        Object.defineProperty(PageObject.prototype, 'title', {
-          get: function() {
-            return this.page.title();
-          }
-        });
+  constructor() {
+    Object.defineProperty(this, 'dynamicProperty', {
+      get() {
+        return cy.get('[data-testid="dynamic"]').invoke('text');
+      },
+      set(value: string) {
+        cy.get('[data-testid="dynamic"]').clear().type(value);
+      },
+      enumerable: true,
+      configurable: true
+    });
+  }
 
-        Object.defineProperty(PageObject.prototype, 'url', {
-          get: function() {
-            return this.page.url();
-          }
-        });
-      `;
+  setupDynamicMethods() {
+    const methods = ['click', 'hover', 'focus'];
+    methods.forEach(method => {
+      Object.defineProperty(this, \`dynamic\${method.charAt(0).toUpperCase() + method.slice(1)}\`, {
+        value: (selector: string) => {
+          cy.get(selector)[\`\${method}\`]();
+        },
+        writable: false,
+        enumerable: true
+      });
+    });
+  }
+}`;
 
-      mockReadFile.mockResolvedValue(getterSetterContent);
+      mockReadFile.mockResolvedValue(descriptorContent as any);
 
-      // Act
-      const result = await detector.analyzeInheritancePatterns('/test/file.ts');
+      const result = await analyzer.analyzePageObject(testFilePath);
 
-      // Assert
-      expect(result.patterns).toHaveLength(1);
-
-      const pattern = result.patterns[0];
-      expect(pattern.type).toBe('property');
-      expect(pattern.baseClass).toBe('PropertyDescriptor');
-      expect(pattern.properties).toContain('title');
-      expect(pattern.properties).toContain('url');
-      expect(pattern.complexity).toBe('medium');
+      expect(result.isPageObject).toBe(true);
+      expect(result.className).toBe('DescriptorPage');
+      expect(result.hasConstructor).toBe(true);
+      expect(result.methods).toHaveLength(2);
+      expect(result.methods.map(m => m.name)).toEqual(['visit', 'setupDynamicMethods']);
+      expect(result.methods.some(m => m.body.includes('Object.defineProperty'))).toBe(true);
     });
   });
 
-  describe('Hybrid Pattern Detection', () => {
-    test('should detect hybrid inheritance and composition patterns', async () => {
-      // Arrange
-      const hybridContent = `
-        class BasePage {
-          constructor(page) { this.page = page; }
-          async navigate() { /* implementation */ }
-        }
+  describe('Complex Edge Cases', () => {
+    test('should handle class with both inheritance and composition', async () => {
+      const hybridContent = `abstract class BaseFormPage {
+  abstract getFormSelector(): string;
 
-        class LoginPage extends BasePage {
-          constructor(page) {
-            super(page);
-            this.validator = new FormValidator(page);
-            this.logger = new Logger();
-          }
+  protected submitForm() {
+    cy.get(this.getFormSelector()).submit();
+  }
+}
 
-          async login(credentials) {
-            await this.validator.validate(credentials);
-            await super.navigate();
-          }
-        }
-      `;
+class ValidationHelper {
+  validateRequired(selector: string) {
+    cy.get(selector).should('have.attr', 'required');
+  }
+}
 
-      mockReadFile.mockResolvedValue(hybridContent);
+class AdvancedLoginPage extends BaseFormPage {
+  private validator = new ValidationHelper();
 
-      // Act
-      const result = await detector.analyzeInheritancePatterns('/test/file.ts');
+  getFormSelector(): string {
+    return '[data-testid="login-form"]';
+  }
 
-      // Assert
-      expect(result.patterns).toHaveLength(3); // inheritance + 2 composition
+  visit() {
+    cy.visit('/advanced-login');
+  }
 
-      const hybridPattern = result.patterns.find(p => p.type === 'hybrid');
-      expect(hybridPattern).toBeDefined();
-      expect(hybridPattern?.baseClass).toBe('BasePage');
-      expect(hybridPattern?.derivedClasses).toContain('LoginPage');
-      expect(hybridPattern?.complexity).toBe('high');
-    });
-  });
+  validateForm() {
+    this.validator.validateRequired('[data-testid="email"]');
+    this.validator.validateRequired('[data-testid="password"]');
+  }
 
-  describe('Method Override Detection', () => {
-    test('should detect method override patterns', async () => {
-      // Arrange
-      const overrideContent = `
-        class BasePage {
-          async navigate() {
-            await this.page.goto('/');
-          }
-        }
+  login(email: string, password: string) {
+    cy.get('[data-testid="email"]').type(email);
+    cy.get('[data-testid="password"]').type(password);
+    this.submitForm();
+  }
+}`;
 
-        class LoginPage extends BasePage {
-          async navigate() {
-            console.log('Navigating to login page');
-            await super.navigate();
-            await this.page.goto('/login');
-          }
-        }
-      `;
+      mockReadFile.mockResolvedValue(hybridContent as any);
 
-      mockReadFile.mockResolvedValue(overrideContent);
+      const result = await analyzer.analyzePageObject(testFilePath);
 
-      // Act
-      const result = await detector.analyzeInheritancePatterns('/test/file.ts');
-
-      // Assert
-      expect(result.patterns).toHaveLength(2); // inheritance + override
-
-      const overridePattern = result.patterns.find(p => p.type === 'override');
-      expect(overridePattern).toBeDefined();
-      expect(overridePattern?.methods).toContain('navigate');
-      expect(overridePattern?.complexity).toBe('medium');
-    });
-  });
-
-  describe('Complex Analysis', () => {
-    test('should calculate total complexity correctly', async () => {
-      // Arrange
-      const complexContent = `
-        abstract class BasePage {
-          abstract navigate(): void;
-        }
-
-        class LoginPage extends BasePage {
-          constructor(page) {
-            super();
-            this.helper = new Helper(page);
-          }
-
-          navigate() {
-            super.navigate();
-          }
-        }
-
-        Object.assign(LoginPage.prototype, SomeMixin);
-      `;
-
-      mockReadFile.mockResolvedValue(complexContent);
-
-      // Act
-      const result = await detector.analyzeInheritancePatterns('/test/file.ts');
-
-      // Assert
-      expect(result.totalComplexity).toBe('high');
-      expect(result.requiresManualReview).toBe(true);
-      expect(result.conversionRecommendations).toContain('Convert abstract classes to Playwright base page classes');
+      expect(result.isPageObject).toBe(true);
+      expect(result.className).toBe('AdvancedLoginPage');
+      expect(result.properties).toHaveLength(1);
+      expect(result.properties[0].name).toBe('validator');
+      expect(result.methods).toHaveLength(4);
+      expect(result.methods.some(m => m.callsOtherMethods && m.calledMethods.includes('submitForm'))).toBe(true);
+      expect(result.methods.some(m => m.body.includes('this.validator.'))).toBe(true);
     });
 
-    test('should provide comprehensive conversion recommendations', async () => {
-      // Arrange
-      const complexContent = `
-        abstract class BasePage { abstract test(): void; }
-        class Child extends BasePage { test() {} }
-        class GrandChild extends Child { }
-        Object.assign(Child.prototype, Mixin);
-      `;
+    test('should detect method overriding patterns', async () => {
+      const overrideContent = `class BasePage {
+  visit() {
+    cy.visit('/base');
+    this.waitForLoad();
+  }
 
-      mockReadFile.mockResolvedValue(complexContent);
+  protected waitForLoad() {
+    cy.get('[data-testid="loader"]').should('not.exist');
+  }
 
-      // Act
-      const result = await detector.analyzeInheritancePatterns('/test/file.ts');
+  protected performPostVisitActions() {
+    // Base implementation
+    cy.log('Base post-visit actions');
+  }
+}
 
-      // Assert
-      expect(result.conversionRecommendations).toContain('Convert abstract classes to Playwright base page classes');
-      expect(result.conversionRecommendations).toContain('Convert mixins to composition pattern for better type safety');
-      expect(result.requiresManualReview).toBe(true);
+class SpecializedPage extends BasePage {
+  visit() {
+    super.visit();
+    this.performPostVisitActions();
+    cy.get('[data-testid="special-element"]').should('be.visible');
+  }
+
+  protected waitForLoad() {
+    // Override with specialized loading
+    super.waitForLoad();
+    cy.get('[data-testid="special-loader"]').should('not.exist');
+    cy.wait(1000); // Additional wait for special page
+  }
+
+  protected performPostVisitActions() {
+    super.performPostVisitActions();
+    cy.get('[data-testid="analytics"]').click();
+  }
+}`;
+
+      mockReadFile.mockResolvedValue(overrideContent as any);
+
+      const result = await analyzer.analyzePageObject(testFilePath);
+
+      expect(result.isPageObject).toBe(true);
+      expect(result.className).toBe('SpecializedPage');
+      expect(result.methods).toHaveLength(3);
+      expect(result.methods.every(m => m.body.includes('super.'))).toBe(true);
+      expect(result.methods.some(m => m.conversionComplexity === 'high')).toBe(true);
     });
   });
 });

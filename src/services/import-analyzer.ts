@@ -1,345 +1,395 @@
-export interface ImportStatement {
-  raw: string;
+import * as fs from 'fs-extra';
+import * as path from 'path';
+import * as ts from 'typescript';
+import { Logger } from '../utils/logger';
+
+export interface ImportInfo {
   source: string;
-  namedImports: string[];
   defaultImport?: string;
+  namedImports?: string[];
   namespaceImport?: string;
-  type: 'builtin' | 'external' | 'relative' | 'cypress' | 'playwright';
-  lineNumber?: number;
+  line: number;
+  isTypeOnly?: boolean;
 }
 
-export interface ImportAnalysisResult {
-  imports: ImportStatement[];
-  duplicates: ImportStatement[];
-  conflicts: string[];
-  cypressImports: ImportStatement[];
-  playwrightImports: ImportStatement[];
+export interface DuplicateImport {
+  source: string;
+  imports: ImportInfo[];
+}
+
+export interface CypressImport {
+  source: string;
+  namedImports?: string[];
+  defaultImport?: string;
+  shouldRemove: boolean;
+  reason: string;
+  line: number;
+}
+
+export interface OrganizedImport {
+  category: 'builtin' | 'external' | 'relative';
+  source: string;
+  imports: string[];
+  defaultImport?: string;
+  namespaceImport?: string;
+}
+
+export interface ImportAnalysisResults {
+  duplicates: DuplicateImport[];
+  cypressImports: CypressImport[];
+  legitImports: ImportInfo[];
+  totalImports: number;
+}
+
+export interface ImportOrganizationResults {
+  organized: OrganizedImport[];
+  removed: CypressImport[];
+  merged: DuplicateImport[];
 }
 
 export class ImportAnalyzer {
+  private logger = new Logger('ImportAnalyzer');
 
-  /**
-   * Analyze imports in a file content
-   */
-  analyzeImports(content: string): ImportAnalysisResult {
-    const imports = this.extractImports(content);
-    const duplicates = this.findDuplicateImports(imports);
-    const conflicts = this.findImportConflicts(imports);
-    const cypressImports = imports.filter(imp => imp.type === 'cypress');
-    const playwrightImports = imports.filter(imp => imp.type === 'playwright');
+  // Angular/Cypress-specific imports that should be removed from e2e tests
+  private readonly cypressPatterns = [
+    '@angular/core/testing',
+    '@angular/platform-browser',
+    '@angular/core',
+    '@angular/common/testing',
+    'jasmine',
+    'karma'
+  ];
 
-    return {
-      imports,
-      duplicates,
-      conflicts,
-      cypressImports,
-      playwrightImports
-    };
+  // Built-in Node.js modules
+  private readonly builtinModules = [
+    'fs', 'path', 'crypto', 'http', 'https', 'url', 'util', 'events',
+    'stream', 'buffer', 'child_process', 'cluster', 'os', 'readline'
+  ];
+
+  async analyzeDuplicateImports(filePath: string): Promise<{ duplicates: DuplicateImport[] }> {
+    try {
+      this.logger.debug(`Analyzing duplicate imports for: ${filePath}`);
+
+      const fileContent = await fs.readFile(filePath, 'utf8');
+      const sourceFile = this.createSourceFile(filePath, fileContent);
+      const imports = this.extractImports(sourceFile);
+
+      const duplicates = this.findDuplicateImports(imports);
+
+      this.logger.debug(`Found ${duplicates.length} duplicate import sources in ${filePath}`);
+      return { duplicates };
+    } catch (error) {
+      this.logger.error(`Failed to analyze duplicate imports for ${filePath}:`, error);
+      throw error;
+    }
   }
 
-  /**
-   * Extract all import statements from content
-   */
-  private extractImports(content: string): ImportStatement[] {
-    const imports: ImportStatement[] = [];
-    const lines = content.split('\n');
+  async analyzeCypressImports(filePath: string): Promise<{ cypressImports: CypressImport[], legitImports: ImportInfo[] }> {
+    try {
+      this.logger.debug(`Analyzing Cypress imports for: ${filePath}`);
 
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
+      const fileContent = await fs.readFile(filePath, 'utf8');
+      const sourceFile = this.createSourceFile(filePath, fileContent);
+      const imports = this.extractImports(sourceFile);
 
-      // Skip comments and empty lines
-      if (!line || line.startsWith('//') || line.startsWith('/*')) {
-        continue;
-      }
+      const cypressImports: CypressImport[] = [];
+      const legitImports: ImportInfo[] = [];
 
-      // Match various import patterns
-      const importMatch = line.match(/^import\s+(.+?)\s+from\s+['"](.*?)['"];?$/);
-      if (importMatch) {
-        const importClause = importMatch[1].trim();
-        const source = importMatch[2];
+      imports.forEach(importInfo => {
+        if (this.isCypressImport(importInfo.source)) {
+          cypressImports.push({
+            source: importInfo.source,
+            namedImports: importInfo.namedImports,
+            defaultImport: importInfo.defaultImport,
+            shouldRemove: true,
+            reason: this.getCypressRemovalReason(importInfo.source),
+            line: importInfo.line
+          });
+        } else {
+          legitImports.push(importInfo);
+        }
+      });
 
-        const importStatement = this.parseImportClause(importClause, source, line, i + 1);
-        imports.push(importStatement);
-      }
+      this.logger.debug(`Found ${cypressImports.length} Cypress imports and ${legitImports.length} legitimate imports`);
+      return { cypressImports, legitImports };
+    } catch (error) {
+      this.logger.error(`Failed to analyze Cypress imports for ${filePath}:`, error);
+      throw error;
+    }
+  }
+
+  async analyzeAllImports(filePath: string): Promise<ImportAnalysisResults> {
+    try {
+      this.logger.debug(`Analyzing all imports for: ${filePath}`);
+
+      const fileContent = await fs.readFile(filePath, 'utf8');
+      const sourceFile = this.createSourceFile(filePath, fileContent);
+      const imports = this.extractImports(sourceFile);
+
+      const duplicates = this.findDuplicateImports(imports);
+      const cypressImports: CypressImport[] = [];
+      const legitImports: ImportInfo[] = [];
+
+      imports.forEach(importInfo => {
+        if (this.isCypressImport(importInfo.source)) {
+          cypressImports.push({
+            source: importInfo.source,
+            namedImports: importInfo.namedImports,
+            defaultImport: importInfo.defaultImport,
+            shouldRemove: true,
+            reason: this.getCypressRemovalReason(importInfo.source),
+            line: importInfo.line
+          });
+        } else {
+          legitImports.push(importInfo);
+        }
+      });
+
+      return {
+        duplicates,
+        cypressImports,
+        legitImports,
+        totalImports: imports.length
+      };
+    } catch (error) {
+      this.logger.error(`Failed to analyze imports for ${filePath}:`, error);
+      throw error;
+    }
+  }
+
+  async organizeImports(filePath: string): Promise<ImportOrganizationResults> {
+    try {
+      this.logger.debug(`Organizing imports for: ${filePath}`);
+
+      const analysis = await this.analyzeAllImports(filePath);
+      const organized = this.categorizeAndMergeImports(analysis.legitImports);
+
+      return {
+        organized,
+        removed: analysis.cypressImports,
+        merged: analysis.duplicates
+      };
+    } catch (error) {
+      this.logger.error(`Failed to organize imports for ${filePath}:`, error);
+      throw error;
+    }
+  }
+
+  mergeImports(duplicates: DuplicateImport[]): OrganizedImport[] {
+    return duplicates.map(duplicate => {
+      const allNamedImports = new Set<string>();
+      let defaultImport: string | undefined;
+      let namespaceImport: string | undefined;
+
+      duplicate.imports.forEach(importInfo => {
+        if (importInfo.namedImports) {
+          importInfo.namedImports.forEach(named => allNamedImports.add(named));
+        }
+        if (importInfo.defaultImport) {
+          defaultImport = importInfo.defaultImport;
+        }
+        if (importInfo.namespaceImport) {
+          namespaceImport = importInfo.namespaceImport;
+        }
+      });
+
+      return {
+        category: this.categorizeImport(duplicate.source),
+        source: duplicate.source,
+        imports: Array.from(allNamedImports),
+        defaultImport,
+        namespaceImport
+      };
+    });
+  }
+
+  removeUnwantedImports(cypressImports: CypressImport[]): CypressImport[] {
+    // Return empty array as these should all be removed
+    return [];
+  }
+
+  private createSourceFile(filePath: string, sourceCode: string): ts.SourceFile {
+    const sourceFile = ts.createSourceFile(
+      filePath,
+      sourceCode,
+      ts.ScriptTarget.Latest,
+      true,
+      this.getScriptKind(filePath)
+    );
+
+    // Check for syntax errors
+    const syntacticDiagnostics = (sourceFile as any).parseDiagnostics || [];
+    if (syntacticDiagnostics.length > 0) {
+      const errors = syntacticDiagnostics.map((diagnostic: ts.Diagnostic) =>
+        ts.flattenDiagnosticMessageText(diagnostic.messageText, '\n')
+      ).join('\n');
+      this.logger.warn(`Syntax errors in ${filePath}, continuing with best effort parsing:\n${errors}`);
     }
 
+    return sourceFile;
+  }
+
+  private getScriptKind(filePath: string): ts.ScriptKind {
+    const ext = path.extname(filePath).toLowerCase();
+    switch (ext) {
+      case '.ts':
+        return ts.ScriptKind.TS;
+      case '.tsx':
+        return ts.ScriptKind.TSX;
+      case '.js':
+        return ts.ScriptKind.JS;
+      case '.jsx':
+        return ts.ScriptKind.JSX;
+      default:
+        return ts.ScriptKind.TS;
+    }
+  }
+
+  private extractImports(sourceFile: ts.SourceFile): ImportInfo[] {
+    const imports: ImportInfo[] = [];
+
+    const visitNode = (node: ts.Node) => {
+      if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+        const importInfo = this.parseImportDeclaration(node, sourceFile);
+        if (importInfo) {
+          imports.push(importInfo);
+        }
+      }
+      ts.forEachChild(node, visitNode);
+    };
+
+    visitNode(sourceFile);
     return imports;
   }
 
-  /**
-   * Parse import clause to extract named, default, and namespace imports
-   */
-  private parseImportClause(
-    importClause: string,
-    source: string,
-    rawStatement: string,
-    lineNumber: number
-  ): ImportStatement {
+  private parseImportDeclaration(node: ts.ImportDeclaration, sourceFile: ts.SourceFile): ImportInfo | null {
+    const source = (node.moduleSpecifier as ts.StringLiteral).text;
+    const line = sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1;
+
     let defaultImport: string | undefined;
+    let namedImports: string[] | undefined;
     let namespaceImport: string | undefined;
-    const namedImports: string[] = [];
 
-    // Handle namespace import: import * as name from 'module'
-    const namespaceMatch = importClause.match(/^\*\s+as\s+(\w+)$/);
-    if (namespaceMatch) {
-      namespaceImport = namespaceMatch[1];
-    } else {
-      // Split by comma to handle mixed imports
-      const parts = importClause.split(',').map(part => part.trim());
+    if (node.importClause) {
+      // Default import
+      if (node.importClause.name) {
+        defaultImport = node.importClause.name.text;
+      }
 
-      for (const part of parts) {
-        // Check for default import (simple identifier)
-        if (/^\w+$/.test(part)) {
-          defaultImport = part;
-        }
-        // Check for named imports in braces
-        else if (part.includes('{') || part.includes('}')) {
-          const namedMatch = part.match(/\{([^}]+)\}/);
-          if (namedMatch) {
-            const named = namedMatch[1]
-              .split(',')
-              .map(item => item.trim())
-              .filter(Boolean);
-            namedImports.push(...named);
-          }
-        }
-        // Handle mixed default and named: default, { named }
-        else if (part.includes('{')) {
-          const mixedMatch = part.match(/(\w+),?\s*\{([^}]+)\}/);
-          if (mixedMatch) {
-            if (!defaultImport) defaultImport = mixedMatch[1].replace(',', '').trim();
-            const named = mixedMatch[2]
-              .split(',')
-              .map(item => item.trim())
-              .filter(Boolean);
-            namedImports.push(...named);
-          }
+      // Named bindings
+      if (node.importClause.namedBindings) {
+        if (ts.isNamespaceImport(node.importClause.namedBindings)) {
+          // import * as name
+          namespaceImport = node.importClause.namedBindings.name.text;
+        } else if (ts.isNamedImports(node.importClause.namedBindings)) {
+          // import { name1, name2 }
+          namedImports = node.importClause.namedBindings.elements.map(
+            element => element.name.text
+          );
         }
       }
     }
 
     return {
-      raw: rawStatement,
       source,
-      namedImports,
       defaultImport,
+      namedImports,
       namespaceImport,
-      type: this.categorizeImport(source),
-      lineNumber
+      line,
+      isTypeOnly: node.importClause?.isTypeOnly || false
     };
   }
 
-  /**
-   * Categorize import based on source
-   */
-  private categorizeImport(source: string): ImportStatement['type'] {
-    // Cypress-related imports
-    if (source.includes('cypress') || source === '@cypress/webpack-preprocessor' ||
-        source === 'cypress-selectors' || source.includes('@cypress/')) {
-      return 'cypress';
-    }
+  private findDuplicateImports(imports: ImportInfo[]): DuplicateImport[] {
+    const sourceMap = new Map<string, ImportInfo[]>();
 
-    // Playwright-related imports
-    if (source.includes('@playwright/') || source === 'playwright') {
-      return 'playwright';
-    }
-
-    // Built-in Node.js modules
-    if (['fs', 'path', 'crypto', 'util', 'os', 'http', 'https', 'url', 'events'].includes(source) ||
-        source.startsWith('node:')) {
-      return 'builtin';
-    }
-
-    // Relative imports
-    if (source.startsWith('./') || source.startsWith('../')) {
-      return 'relative';
-    }
-
-    // External npm packages
-    return 'external';
-  }
-
-  /**
-   * Find duplicate imports (same source)
-   */
-  private findDuplicateImports(imports: ImportStatement[]): ImportStatement[] {
-    const sourceMap = new Map<string, ImportStatement[]>();
-
-    for (const imp of imports) {
-      if (!sourceMap.has(imp.source)) {
-        sourceMap.set(imp.source, []);
+    imports.forEach(importInfo => {
+      if (!sourceMap.has(importInfo.source)) {
+        sourceMap.set(importInfo.source, []);
       }
-      sourceMap.get(imp.source)!.push(imp);
-    }
+      sourceMap.get(importInfo.source)!.push(importInfo);
+    });
 
-    const duplicates: ImportStatement[] = [];
-    for (const [source, importsForSource] of sourceMap) {
-      if (importsForSource.length > 1) {
-        duplicates.push(...importsForSource);
+    const duplicates: DuplicateImport[] = [];
+    sourceMap.forEach((importList, source) => {
+      if (importList.length > 1) {
+        duplicates.push({
+          source,
+          imports: importList
+        });
       }
-    }
+    });
 
     return duplicates;
   }
 
-  /**
-   * Find import conflicts (same import name from different sources)
-   */
-  private findImportConflicts(imports: ImportStatement[]): string[] {
-    const nameToSources = new Map<string, Set<string>>();
-    const conflicts: string[] = [];
-
-    for (const imp of imports) {
-      // Check default imports
-      if (imp.defaultImport) {
-        if (!nameToSources.has(imp.defaultImport)) {
-          nameToSources.set(imp.defaultImport, new Set());
-        }
-        nameToSources.get(imp.defaultImport)!.add(imp.source);
-      }
-
-      // Check named imports
-      for (const named of imp.namedImports) {
-        const cleanName = named.split(' as ')[0].trim(); // Handle aliased imports
-        if (!nameToSources.has(cleanName)) {
-          nameToSources.set(cleanName, new Set());
-        }
-        nameToSources.get(cleanName)!.add(imp.source);
-      }
-
-      // Check namespace imports
-      if (imp.namespaceImport) {
-        if (!nameToSources.has(imp.namespaceImport)) {
-          nameToSources.set(imp.namespaceImport, new Set());
-        }
-        nameToSources.get(imp.namespaceImport)!.add(imp.source);
-      }
-    }
-
-    for (const [name, sources] of nameToSources) {
-      if (sources.size > 1) {
-        conflicts.push(`Import '${name}' comes from multiple sources: ${Array.from(sources).join(', ')}`);
-      }
-    }
-
-    return conflicts;
+  private isCypressImport(source: string): boolean {
+    return this.cypressPatterns.some(pattern => source.startsWith(pattern));
   }
 
-  /**
-   * Check if imports are compatible (can be merged)
-   */
-  canMergeImports(import1: ImportStatement, import2: ImportStatement): boolean {
-    return import1.source === import2.source;
+  private getCypressRemovalReason(source: string): string {
+    if (source.startsWith('@angular')) {
+      return 'Angular testing import not needed in e2e tests';
+    }
+    if (source.includes('jasmine') || source.includes('karma')) {
+      return 'Unit testing framework import not needed in e2e tests';
+    }
+    return 'Cypress-specific import not compatible with Playwright';
   }
 
-  /**
-   * Merge compatible imports
-   */
-  mergeImports(imports: ImportStatement[]): ImportStatement {
-    if (imports.length === 0) {
-      throw new Error('Cannot merge empty imports array');
-    }
+  private categorizeAndMergeImports(imports: ImportInfo[]): OrganizedImport[] {
+    const categorized = new Map<string, {
+      category: 'builtin' | 'external' | 'relative';
+      namedImports: Set<string>;
+      defaultImport?: string;
+      namespaceImport?: string;
+    }>();
 
-    const firstImport = imports[0];
-    const mergedImport: ImportStatement = {
-      raw: '', // Will be regenerated
-      source: firstImport.source,
-      namedImports: [],
-      type: firstImport.type
-    };
+    imports.forEach(importInfo => {
+      const category = this.categorizeImport(importInfo.source);
 
-    const allNamedImports = new Set<string>();
-    let hasDefaultImport = false;
-    let hasNamespaceImport = false;
-
-    for (const imp of imports) {
-      // Collect named imports
-      for (const named of imp.namedImports) {
-        allNamedImports.add(named);
+      if (!categorized.has(importInfo.source)) {
+        categorized.set(importInfo.source, {
+          category,
+          namedImports: new Set(),
+          defaultImport: importInfo.defaultImport,
+          namespaceImport: importInfo.namespaceImport
+        });
       }
 
-      // Handle default import (take first non-undefined)
-      if (imp.defaultImport && !hasDefaultImport) {
-        mergedImport.defaultImport = imp.defaultImport;
-        hasDefaultImport = true;
+      const entry = categorized.get(importInfo.source)!;
+      if (importInfo.namedImports) {
+        importInfo.namedImports.forEach(named => entry.namedImports.add(named));
       }
+    });
 
-      // Handle namespace import (take first non-undefined)
-      if (imp.namespaceImport && !hasNamespaceImport) {
-        mergedImport.namespaceImport = imp.namespaceImport;
-        hasNamespaceImport = true;
-      }
-    }
+    // Convert to organized imports and sort
+    const organized: OrganizedImport[] = Array.from(categorized.entries()).map(([source, info]) => ({
+      category: info.category,
+      source,
+      imports: Array.from(info.namedImports).sort(),
+      defaultImport: info.defaultImport,
+      namespaceImport: info.namespaceImport
+    }));
 
-    mergedImport.namedImports = Array.from(allNamedImports).sort();
-    mergedImport.raw = this.generateImportStatement(mergedImport);
-
-    return mergedImport;
-  }
-
-  /**
-   * Generate import statement string from ImportStatement object
-   */
-  private generateImportStatement(imp: ImportStatement): string {
-    const parts: string[] = [];
-
-    // Add default import
-    if (imp.defaultImport) {
-      parts.push(imp.defaultImport);
-    }
-
-    // Add namespace import
-    if (imp.namespaceImport) {
-      parts.push(`* as ${imp.namespaceImport}`);
-    }
-
-    // Add named imports
-    if (imp.namedImports.length > 0) {
-      const namedPart = `{ ${imp.namedImports.join(', ')} }`;
-      parts.push(namedPart);
-    }
-
-    const importClause = parts.join(', ');
-    return `import ${importClause} from '${imp.source}';`;
-  }
-
-  /**
-   * Sort imports by category and source
-   */
-  sortImports(imports: ImportStatement[]): ImportStatement[] {
-    const typeOrder = ['builtin', 'external', 'relative', 'playwright'];
-
-    return imports.sort((a, b) => {
-      // First sort by type
-      const typeComparison = typeOrder.indexOf(a.type) - typeOrder.indexOf(b.type);
-      if (typeComparison !== 0) {
-        return typeComparison;
-      }
-
-      // Then sort by source alphabetically
+    // Sort by category, then by source
+    organized.sort((a, b) => {
+      const categoryOrder = { builtin: 0, external: 1, relative: 2 };
+      const categoryDiff = categoryOrder[a.category] - categoryOrder[b.category];
+      if (categoryDiff !== 0) return categoryDiff;
       return a.source.localeCompare(b.source);
     });
+
+    return organized;
   }
 
-  /**
-   * Filter out Cypress-specific imports that should be removed
-   */
-  filterCypressImports(imports: ImportStatement[]): ImportStatement[] {
-    const cypressImportsToRemove = [
-      'cypress',
-      '@cypress/webpack-preprocessor',
-      '@cypress/code-coverage',
-      'cypress-real-events',
-      'cypress-selectors',
-      '@testing-library/cypress',
-      'cypress-iframe',
-      'cypress-file-upload'
-    ];
-
-    return imports.filter(imp =>
-      !cypressImportsToRemove.includes(imp.source) &&
-      !imp.source.startsWith('@cypress/') &&
-      imp.type !== 'cypress'
-    );
+  private categorizeImport(source: string): 'builtin' | 'external' | 'relative' {
+    if (this.builtinModules.includes(source)) {
+      return 'builtin';
+    }
+    if (source.startsWith('.')) {
+      return 'relative';
+    }
+    return 'external';
   }
 }
