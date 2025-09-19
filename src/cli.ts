@@ -20,6 +20,7 @@ import { ProjectGenerator } from './project-generator';
 import { GitHubRepository } from './github-repository';
 import { GitLabRepository } from './gitlab-repository';
 import { RepositoryDetector } from './repository-detector';
+import { EnhancedConversionService } from './services/enhanced-conversion-service';
 
 export class CLI {
   private program: Command;
@@ -29,6 +30,7 @@ export class CLI {
   private githubRepo: GitHubRepository;
   private gitlabRepo: GitLabRepository;
   private repoDetector: RepositoryDetector;
+  private enhancedConversionService: EnhancedConversionService;
 
   constructor() {
     this.program = new Command();
@@ -38,6 +40,7 @@ export class CLI {
     this.githubRepo = new GitHubRepository();
     this.gitlabRepo = new GitLabRepository();
     this.repoDetector = new RepositoryDetector();
+    this.enhancedConversionService = new EnhancedConversionService();
     this.setupCommands();
   }
 
@@ -54,6 +57,10 @@ export class CLI {
       .requiredOption('-o, --output <path>', 'Output directory for Playwright project')
       .option('--preserve-structure', 'Preserve original directory structure', false)
       .option('--generate-page-objects', 'Generate page object models from custom commands', true)
+      .option('--preserve-method-chaining', 'Preserve method chaining in page objects', true)
+      .option('--deduplicate-imports', 'Remove duplicate imports and clean up dependencies', true)
+      .option('--transform-import-paths', 'Transform import paths for Playwright structure', true)
+      .option('--convert-test-structure', 'Convert describe/context blocks to Playwright test.describe', true)
       .option('-v, --verbose', 'Enable verbose logging', false)
       .action(async (options) => {
         await this.handleConversion({

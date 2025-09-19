@@ -83,7 +83,7 @@ export class TestStructureConverter {
     options: TestConversionOptions,
     warnings: string[]
   ): string {
-    const { preserveHooks } = options;
+    const { preserveHooks = true } = options;
     const parts: string[] = [];
 
     // Convert hooks if present
@@ -122,7 +122,7 @@ ${this.indentContent(content, 2)}
     options: TestConversionOptions,
     warnings: string[]
   ): string {
-    const { convertAssertions } = options;
+    const { convertAssertions = true } = options;
 
     // Convert commands to Playwright syntax
     const convertedCommands = cypressTest.commands

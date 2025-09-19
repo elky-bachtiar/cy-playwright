@@ -58,6 +58,9 @@ export class CustomCommandHandler {
         case 'navigateToSection':
           result = this.convertNavigateToSectionCommand(args);
           break;
+        case 'fillLoginForm':
+          result = this.convertFillLoginFormCommand(args);
+          break;
         default:
           result = this.convertGenericCustomCommand(commandName, args);
           break;
@@ -204,6 +207,31 @@ await page.getByRole('link', { name: '${subsection}' }).click();`;
         strategy: 'utility',
         complexity: 'medium',
         notes: ['Navigation implementation may need adjustment based on actual UI structure']
+      }
+    };
+  }
+
+  private convertFillLoginFormCommand(args: string[]): CustomCommandConversionResult {
+    const [email, password] = args.map(arg => this.cleanQuotes(arg));
+
+    const playwrightEquivalent = `// Convert to page object method
+export class LoginPage {
+  constructor(private page: Page) {}
+
+  async fillLoginForm(email: string, password: string) {
+    await this.page.getByRole('textbox', { name: /email/i }).fill(email);
+    await this.page.getByRole('textbox', { name: /password/i }).fill(password);
+  }
+}`;
+
+    return {
+      isValid: true,
+      playwrightEquivalent,
+      conversionSuccess: true,
+      transformationMetadata: {
+        strategy: 'pageobject',
+        complexity: 'medium',
+        notes: ['Converted to page object method pattern for better maintainability']
       }
     };
   }

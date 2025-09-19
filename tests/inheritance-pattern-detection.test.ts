@@ -4,7 +4,7 @@ import * as fs from 'fs-extra';
 
 // Mock fs-extra
 jest.mock('fs-extra');
-const mockReadFile = fs.readFile as jest.MockedFunction<typeof fs.readFile>;
+const mockReadFile = fs.readFile as jest.MockedFunction<any>;
 
 describe('InheritancePatternDetector', () => {
   let detector: InheritancePatternDetector;
