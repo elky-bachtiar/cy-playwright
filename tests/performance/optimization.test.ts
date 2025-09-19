@@ -21,9 +21,9 @@ describe('Performance Optimization System', () => {
   beforeEach(async () => {
     await testSetup.clearDatabase();
     performanceOptimizer = new PerformanceOptimizer();
-    loadBalancer = new LoadBalancer();
-    resourceManager = new ResourceManager();
-    compressionService = new CompressionService();
+    loadBalancer = new LoadBalancer({ algorithm: 'round-robin' });
+    resourceManager = new ResourceManager({ maxConcurrentJobs: 5 });
+    compressionService = new CompressionService({ algorithm: 'gzip' });
   });
 
   afterEach(async () => {
@@ -235,19 +235,16 @@ describe('Performance Optimization System', () => {
 
   describe('LoadBalancer', () => {
     it('should distribute requests across multiple workers', async () => {
-      await loadBalancer.initialize({
-        algorithm: 'round-robin',
-        workers: [
-          { id: 'worker-1', weight: 1, health: 'healthy' },
-          { id: 'worker-2', weight: 1, health: 'healthy' },
-          { id: 'worker-3', weight: 1, health: 'healthy' }
-        ]
-      });
+      await loadBalancer.initialize();
+
+      loadBalancer.addServer({ id: 'worker-1', host: 'localhost', port: 3001, weight: 1 });
+      loadBalancer.addServer({ id: 'worker-2', host: 'localhost', port: 3002, weight: 1 });
+      loadBalancer.addServer({ id: 'worker-3', host: 'localhost', port: 3003, weight: 1 });
 
       const assignments = [];
       for (let i = 0; i < 9; i++) {
-        const assignment = await loadBalancer.assignRequest(`request-${i}`);
-        assignments.push(assignment.workerId);
+        const assignment = await loadBalancer.getNextServer();
+        assignments.push(assignment?.id);
       }
 
       // Should distribute evenly in round-robin
@@ -259,19 +256,16 @@ describe('Performance Optimization System', () => {
     });
 
     it('should implement weighted load balancing', async () => {
-      await loadBalancer.initialize({
-        algorithm: 'weighted-round-robin',
-        workers: [
-          { id: 'high-capacity', weight: 3, health: 'healthy' },
-          { id: 'medium-capacity', weight: 2, health: 'healthy' },
-          { id: 'low-capacity', weight: 1, health: 'healthy' }
-        ]
-      });
+      await loadBalancer.initialize();
+
+      loadBalancer.addServer({ id: 'high-capacity', host: 'localhost', port: 3001, weight: 3 });
+      loadBalancer.addServer({ id: 'medium-capacity', host: 'localhost', port: 3002, weight: 2 });
+      loadBalancer.addServer({ id: 'low-capacity', host: 'localhost', port: 3003, weight: 1 });
 
       const assignments = [];
       for (let i = 0; i < 12; i++) {
-        const assignment = await loadBalancer.assignRequest(`request-${i}`);
-        assignments.push(assignment.workerId);
+        const assignment = await loadBalancer.getNextServer();
+        assignments.push(assignment?.id);
       }
 
       // Count assignments per worker
@@ -286,19 +280,23 @@ describe('Performance Optimization System', () => {
     });
 
     it('should implement least-connections algorithm', async () => {
-      await loadBalancer.initialize({
-        algorithm: 'least-connections',
-        workers: [
-          { id: 'worker-1', activeConnections: 5 },
-          { id: 'worker-2', activeConnections: 2 },
-          { id: 'worker-3', activeConnections: 8 }
-        ]
-      });
+      // Create a least-connections load balancer
+      const leastConnectionsBalancer = new LoadBalancer({ algorithm: 'least-connections' });
+      await leastConnectionsBalancer.initialize();
 
-      const assignment = await loadBalancer.assignRequest('test-request');
+      leastConnectionsBalancer.addServer({ id: 'worker-1', host: 'localhost', port: 3001 });
+      leastConnectionsBalancer.addServer({ id: 'worker-2', host: 'localhost', port: 3002 });
+      leastConnectionsBalancer.addServer({ id: 'worker-3', host: 'localhost', port: 3003 });
+
+      // Simulate different connection counts
+      for (let i = 0; i < 5; i++) await leastConnectionsBalancer.recordConnectionStart('worker-1');
+      for (let i = 0; i < 2; i++) await leastConnectionsBalancer.recordConnectionStart('worker-2');
+      for (let i = 0; i < 8; i++) await leastConnectionsBalancer.recordConnectionStart('worker-3');
+
+      const assignment = await leastConnectionsBalancer.getNextServer();
 
       // Should assign to worker with least connections
-      expect(assignment.workerId).toBe('worker-2');
+      expect(assignment?.id).toBe('worker-2');
     });
 
     it('should handle worker health checks and failover', async () => {
@@ -315,8 +313,8 @@ describe('Performance Optimization System', () => {
       // Should only assign to healthy workers
       const assignments = [];
       for (let i = 0; i < 6; i++) {
-        const assignment = await loadBalancer.assignRequest(`request-${i}`);
-        assignments.push(assignment.workerId);
+        const assignment = await loadBalancer.getNextServer();
+        assignments.push(assignment?.id);
       }
 
       // Should only include healthy and degraded workers (not unhealthy)
@@ -334,13 +332,13 @@ describe('Performance Optimization System', () => {
       const userId = 'user-123';
 
       // First request should establish session
-      const firstAssignment = await loadBalancer.assignRequest('request-1', { userId });
+      const firstAssignment = await loadBalancer.getNextServer('request-1', { userId });
       const assignedWorker = firstAssignment.workerId;
 
       // Subsequent requests with same userId should go to same worker
       for (let i = 2; i <= 5; i++) {
-        const assignment = await loadBalancer.assignRequest(`request-${i}`, { userId });
-        expect(assignment.workerId).toBe(assignedWorker);
+        const assignment = await loadBalancer.getNextServer(`request-${i}`, { userId });
+        expect(assignment?.id).toBe(assignedWorker);
       }
     });
 
@@ -356,7 +354,7 @@ describe('Performance Optimization System', () => {
 
       // Process some requests
       for (let i = 0; i < 10; i++) {
-        await loadBalancer.assignRequest(`request-${i}`);
+        await loadBalancer.getNextServer(`request-${i}`);
       }
 
       const stats = await loadBalancer.getStats();
@@ -700,7 +698,7 @@ describe('Performance Optimization System', () => {
 
         try {
           // Simulate API request
-          await loadBalancer.assignRequest(`user-${userId}-request-${Date.now()}`);
+          await loadBalancer.getNextServer(`user-${userId}-request-${Date.now()}`);
           await new Promise(resolve => setTimeout(resolve, Math.random() * 100)); // Simulate processing
 
           requests.push({

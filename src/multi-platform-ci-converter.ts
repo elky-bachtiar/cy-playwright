@@ -331,13 +331,6 @@ export class MultiPlatformCIConverter {
     // Add checkout step
     convertedJob.steps.push('checkout');
 
-    // Add Node.js setup if needed
-    convertedJob.steps.push({
-      name: 'Setup Node.js',
-      uses: 'actions/setup-node@v3',
-      with: { 'node-version': '18' }
-    });
-
     // Install dependencies
     convertedJob.steps.push({
       name: 'Install dependencies',
@@ -362,16 +355,14 @@ export class MultiPlatformCIConverter {
       run: `npx playwright test --project ${browserProject}`
     });
 
-    // Add artifact upload if record is enabled
+    // Add artifact storage if record is enabled (CircleCI style)
     if (jobConfig.record) {
       convertedJob.steps.push({
-        name: 'Upload test results',
-        uses: 'actions/upload-artifact@v3',
-        with: {
-          name: `playwright-results-${browserProject}`,
-          path: 'test-results/'
-        },
-        if: 'always()'
+        name: 'Store test results',
+        'store_artifacts': {
+          path: 'test-results/',
+          destination: `playwright-results-${browserProject}`
+        }
       });
     }
 

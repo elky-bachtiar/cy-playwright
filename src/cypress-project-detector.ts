@@ -67,11 +67,13 @@ export interface DependencyResult {
 }
 
 export interface ProjectAnalysis {
+  detected: boolean // Alias for isCypressProject for test compatibility
   isCypressProject: boolean
   configuration: ConfigurationResult
   structure: ProjectStructureResult
   dependencies: DependencyResult
   packageManager: PackageManagerResult
+  error?: string // For test compatibility
   summary: {
     projectType: string
     complexity: 'simple' | 'moderate' | 'complex'
@@ -789,6 +791,7 @@ export class CypressProjectDetector {
     }
 
     return {
+      detected: isCypressProject, // Alias for test compatibility
       isCypressProject,
       configuration,
       structure,

@@ -744,4 +744,45 @@ export class AnalysisService {
       status: 'healthy'
     };
   }
+
+  // Additional API methods for the analysis endpoints
+  async analyzeRepository(options: {
+    repositoryUrl: string;
+    branch?: string;
+    options?: {
+      includePatterns?: boolean;
+      includeComplexity?: boolean;
+      includeEstimate?: boolean;
+    };
+  }): Promise<any> {
+    this.logger.info(`Analyzing repository: ${options.repositoryUrl}`);
+    // Implementation would go here
+    throw new Error('Method not implemented');
+  }
+
+
+  async analyzePatterns(options: {
+    repositoryUrl: string;
+    patternTypes?: string[];
+  }): Promise<any> {
+    this.logger.info(`Analyzing patterns for: ${options.repositoryUrl}`);
+    // Implementation would go here
+    throw new Error('Method not implemented');
+  }
+
+  async compareRepositories(options: {
+    repository1: string;
+    repository2: string;
+    compareFields?: string[];
+  }): Promise<any> {
+    this.logger.info(`Comparing repositories: ${options.repository1} vs ${options.repository2}`);
+    // Implementation would go here
+    throw new Error('Method not implemented');
+  }
+
+  async getBenchmarks(category?: string): Promise<any> {
+    this.logger.info(`Getting benchmarks${category ? ` for category: ${category}` : ''}`);
+    // Implementation would go here
+    throw new Error('Method not implemented');
+  }
 }

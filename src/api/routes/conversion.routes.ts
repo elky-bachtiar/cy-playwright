@@ -1,9 +1,13 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { ConversionService } from '../../services/conversion.service';
 import { RepositoryService } from '../../services/repository.service';
+import { GitHubService } from '../../services/github.service';
+import { AnalysisService } from '../../services/analysis.service';
+import { ReportingService } from '../../services/reporting.service';
 import { ValidationMiddleware } from '../middleware/validation';
 import { AsyncHandler } from '../middleware/async-handler';
-import { ConversionRequest, ConversionOptions } from '../../types/api.types';
+import { ConversionRequest, ConversionOptions as ApiConversionOptions } from '../../types/api.types';
+import { ConversionOptions } from '../../services/conversion.service';
 
 export class ConversionRouter {
   public router: Router;
@@ -12,8 +16,20 @@ export class ConversionRouter {
 
   constructor() {
     this.router = Router();
-    this.conversionService = new ConversionService();
+
+    // Initialize required services
+    const githubService = new GitHubService();
+    const analysisService = new AnalysisService();
+    const reportingService = new ReportingService();
+
     this.repositoryService = new RepositoryService();
+    this.conversionService = new ConversionService(
+      githubService,
+      this.repositoryService,
+      analysisService,
+      reportingService
+    );
+
     this.setupRoutes();
   }
 
@@ -77,7 +93,7 @@ export class ConversionRouter {
       );
 
       res.json(validation);
-    } catch (error) {
+    } catch (error: any) {
       if (error.message.includes('not found')) {
         res.status(404).json({
           error: 'Repository not found or inaccessible',
@@ -112,17 +128,32 @@ export class ConversionRouter {
         conversionRequest.accessToken
       );
 
-      if (!validation.valid) {
-        return res.status(422).json({
+      if (!validation.isValid) {
+        res.status(422).json({
           error: 'Repository is not a valid Cypress project',
           code: 'INVALID_CYPRESS_PROJECT',
           details: validation
         });
+        return;
       }
+
+      // Convert API options to service options
+      const serviceOptions: ConversionOptions | undefined = conversionRequest.options ? {
+        outputDirectory: conversionRequest.outputPath,
+        preserveComments: true,
+        generatePageObjects: conversionRequest.options.generateTypes || false,
+        includeCI: true,
+        targetFramework: 'playwright'
+      } : undefined;
 
       // Start the conversion process
       const result = await this.conversionService.startConversion({
-        ...conversionRequest,
+        repositoryUrl: conversionRequest.repositoryUrl,
+        accessToken: conversionRequest.accessToken,
+        branch: conversionRequest.branch,
+        outputPath: conversionRequest.outputPath,
+        userEmail: conversionRequest.userEmail,
+        options: serviceOptions,
         validation
       });
 
@@ -133,7 +164,7 @@ export class ConversionRouter {
         estimatedDuration: result.estimatedDuration,
         queuePosition: result.queuePosition || 0
       });
-    } catch (error) {
+    } catch (error: any) {
       if (error.message.includes('Rate limit')) {
         res.status(429).json({
           error: 'Rate limit exceeded. Please try again later.',
@@ -161,7 +192,7 @@ export class ConversionRouter {
     try {
       const status = await this.conversionService.getConversionStatus(jobId);
       res.json(status);
-    } catch (error) {
+    } catch (error: any) {
       if (error.message.includes('Job not found')) {
         res.status(404).json({
           error: 'Conversion job not found',
@@ -180,12 +211,13 @@ export class ConversionRouter {
       // Check if conversion is completed
       const status = await this.conversionService.getConversionStatus(jobId);
 
-      if (status.status !== 'completed') {
-        return res.status(400).json({
+      if (!status || status.status !== 'completed') {
+        res.status(400).json({
           error: 'Conversion not yet completed',
           code: 'CONVERSION_INCOMPLETE',
-          currentStatus: status.status
+          currentStatus: status?.status || 'unknown'
         });
+        return;
       }
 
       // Get download stream
@@ -198,7 +230,7 @@ export class ConversionRouter {
       const stream = await this.conversionService.getDownloadStream(jobId);
       stream.pipe(res);
 
-      stream.on('error', (error) => {
+      stream.on('error', (error: any) => {
         console.error('Download stream error:', error);
         if (!res.headersSent) {
           res.status(500).json({
@@ -208,7 +240,7 @@ export class ConversionRouter {
         }
       });
 
-    } catch (error) {
+    } catch (error: any) {
       if (error.message.includes('Job not found')) {
         res.status(404).json({
           error: 'Conversion job not found',
@@ -232,18 +264,28 @@ export class ConversionRouter {
       // Check current status
       const status = await this.conversionService.getConversionStatus(jobId);
 
+      if (!status) {
+        res.status(404).json({
+          error: 'Conversion job not found',
+          code: 'JOB_NOT_FOUND'
+        });
+        return;
+      }
+
       if (status.status === 'completed') {
-        return res.status(400).json({
+        res.status(400).json({
           error: 'Cannot cancel completed conversion',
           code: 'CONVERSION_ALREADY_COMPLETED'
         });
+        return;
       }
 
       if (status.status === 'failed') {
-        return res.status(400).json({
+        res.status(400).json({
           error: 'Cannot cancel failed conversion',
           code: 'CONVERSION_ALREADY_FAILED'
         });
+        return;
       }
 
       const cancelled = await this.conversionService.cancelConversion(jobId);
@@ -259,7 +301,7 @@ export class ConversionRouter {
           code: 'CANCELLATION_FAILED'
         });
       }
-    } catch (error) {
+    } catch (error: any) {
       if (error.message.includes('Job not found')) {
         res.status(404).json({
           error: 'Conversion job not found',
@@ -292,7 +334,7 @@ export class ConversionRouter {
           hasMore: logs.total > Number(offset) + Number(limit)
         }
       });
-    } catch (error) {
+    } catch (error: any) {
       if (error.message.includes('Job not found')) {
         res.status(404).json({
           error: 'Conversion job not found',
@@ -331,7 +373,7 @@ export class ConversionRouter {
           hasMore: conversions.total > Number(offset) + Number(limit)
         }
       });
-    } catch (error) {
+    } catch (error: any) {
       throw error;
     }
   }

@@ -28,7 +28,7 @@ describe('Docker Integration Conversion', () => {
     jest.clearAllMocks();
 
     // Setup default fs.existsSync behavior
-    mockFs.existsSync.mockImplementation((filePath: string) => {
+    mockFs.existsSync.mockImplementation((filePath) => {
       const pathStr = filePath.toString();
       return pathStr.includes('Dockerfile') ||
              pathStr.includes('docker-compose') ||
@@ -36,7 +36,7 @@ describe('Docker Integration Conversion', () => {
     });
 
     // Setup default fs.readFileSync behavior
-    mockFs.readFileSync.mockImplementation((filePath: string) => {
+    mockFs.readFileSync.mockImplementation((filePath) => {
       const pathStr = filePath.toString();
       if (pathStr.includes('Dockerfile')) {
         return mockDockerfile;

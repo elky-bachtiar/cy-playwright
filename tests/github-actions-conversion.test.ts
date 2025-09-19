@@ -28,13 +28,13 @@ describe('GitHub Actions Conversion', () => {
     jest.clearAllMocks();
 
     // Setup default fs.existsSync behavior
-    mockFs.existsSync.mockImplementation((filePath: string) => {
+    mockFs.existsSync.mockImplementation((filePath: any) => {
       const pathStr = filePath.toString();
       return pathStr.includes('.github/workflows') || pathStr.includes('cypress.config.js');
     });
 
     // Setup default fs.readFileSync behavior
-    mockFs.readFileSync.mockImplementation((filePath: string) => {
+    mockFs.readFileSync.mockImplementation((filePath: any) => {
       const pathStr = filePath.toString();
       if (pathStr.includes('.github/workflows')) {
         return mockCypressWorkflow;
@@ -281,6 +281,7 @@ jobs:
         name: 'Build',
         jobs: {
           build: {
+            'runs-on': 'ubuntu-latest',
             steps: [{ name: 'Build', run: 'npm run build' }]
           }
         }
@@ -299,8 +300,8 @@ jobs:
         { enableSharding: true, shardCount: 4 }
       );
 
-      expect(convertedWorkflow.jobs['playwright-run'].strategy.matrix).toHaveProperty('shard');
-      expect(convertedWorkflow.jobs['playwright-run'].strategy.matrix.shard).toEqual([1, 2, 3, 4]);
+      expect(convertedWorkflow.jobs['playwright-run'].strategy!.matrix).toHaveProperty('shard');
+      expect(convertedWorkflow.jobs['playwright-run'].strategy!.matrix!.shard).toEqual([1, 2, 3, 4]);
     });
 
     it('should preserve browser matrix while adding sharding', async () => {
@@ -309,9 +310,9 @@ jobs:
         { enableSharding: true, shardCount: 2 }
       );
 
-      const matrix = convertedWorkflow.jobs['playwright-run'].strategy.matrix;
-      expect(matrix.browser).toEqual(['chromium', 'firefox', 'webkit']);
-      expect(matrix.shard).toEqual([1, 2]);
+      const matrix = convertedWorkflow.jobs['playwright-run'].strategy!.matrix;
+      expect(matrix!.browser).toEqual(['chromium', 'firefox', 'webkit']);
+      expect(matrix!.shard).toEqual([1, 2]);
     });
 
     it('should generate Playwright test command with sharding', async () => {
@@ -324,7 +325,7 @@ jobs:
         step => step.name === 'Run Playwright tests'
       );
 
-      expect(testStep.run).toContain('--shard=${{ matrix.shard }}/${{ strategy.job-total }}');
+      expect(testStep!.run).toContain('--shard=${{ matrix.shard }}/${{ strategy.job-total }}');
     });
   });
 
@@ -337,8 +338,8 @@ jobs:
       );
 
       expect(reportStep).toBeDefined();
-      expect(reportStep.with.name).toBe('playwright-report-${{ matrix.browser }}');
-      expect(reportStep.with.path).toBe('playwright-report/');
+      expect(reportStep!.with!.name).toBe('playwright-report-${{ matrix.browser }}');
+      expect(reportStep!.with!.path).toBe('playwright-report/');
     });
 
     it('should convert Cypress video artifacts to Playwright traces', async () => {
@@ -349,8 +350,8 @@ jobs:
       );
 
       expect(traceStep).toBeDefined();
-      expect(traceStep.with.name).toBe('playwright-traces-${{ matrix.browser }}');
-      expect(traceStep.with.path).toBe('test-results/');
+      expect(traceStep!.with!.name).toBe('playwright-traces-${{ matrix.browser }}');
+      expect(traceStep!.with!.path).toBe('test-results/');
     });
 
     it('should maintain conditional artifact upload behavior', async () => {
@@ -363,8 +364,8 @@ jobs:
         step => step.name === 'Upload trace files'
       );
 
-      expect(reportStep.if).toBe('always()');
-      expect(traceStep.if).toBe('failure()');
+      expect(reportStep!.if).toBe('always()');
+      expect(traceStep!.if).toBe('failure()');
     });
   });
 
@@ -372,8 +373,8 @@ jobs:
     it('should convert Cypress browsers to Playwright projects', async () => {
       const convertedWorkflow = await actionsConverter.convertWorkflow(mockParsedWorkflow);
 
-      const matrix = convertedWorkflow.jobs['playwright-run'].strategy.matrix;
-      expect(matrix.browser).toEqual(['chromium', 'firefox', 'webkit']);
+      const matrix = convertedWorkflow.jobs['playwright-run'].strategy!.matrix;
+      expect(matrix!.browser).toEqual(['chromium', 'firefox', 'webkit']);
     });
 
     it('should handle custom browser configurations', async () => {
@@ -393,8 +394,8 @@ jobs:
 
       const convertedWorkflow = await actionsConverter.convertWorkflow(customWorkflow);
 
-      const matrix = convertedWorkflow.jobs['playwright-run'].strategy.matrix;
-      expect(matrix.browser).toEqual(['chromium', 'firefox', 'webkit']); // electron mapped to chromium
+      const matrix = convertedWorkflow.jobs['playwright-run'].strategy!.matrix;
+      expect(matrix!.browser).toEqual(['chromium', 'firefox', 'webkit']); // electron mapped to chromium
     });
 
     it('should preserve non-browser matrix dimensions', async () => {
@@ -416,9 +417,9 @@ jobs:
 
       const convertedWorkflow = await actionsConverter.convertWorkflow(multiDimensionWorkflow);
 
-      const matrix = convertedWorkflow.jobs['playwright-run'].strategy.matrix;
-      expect(matrix['node-version']).toEqual([16, 18, 20]);
-      expect(matrix.os).toEqual(['ubuntu-latest', 'windows-latest']);
+      const matrix = convertedWorkflow.jobs['playwright-run'].strategy!.matrix;
+      expect(matrix!['node-version']).toEqual([16, 18, 20]);
+      expect(matrix!.os).toEqual(['ubuntu-latest', 'windows-latest']);
     });
   });
 
@@ -430,7 +431,7 @@ jobs:
         step => step.name === 'Run Playwright tests'
       );
 
-      expect(testStep.env).not.toHaveProperty('CYPRESS_RECORD_KEY');
+      expect(testStep!.env).not.toHaveProperty('CYPRESS_RECORD_KEY');
     });
 
     it('should preserve generic environment variables', async () => {
@@ -440,7 +441,7 @@ jobs:
         step => step.name === 'Run Playwright tests'
       );
 
-      expect(testStep.env).toHaveProperty('GITHUB_TOKEN');
+      expect(testStep!.env).toHaveProperty('GITHUB_TOKEN');
     });
 
     it('should add Playwright-specific environment variables', async () => {
@@ -453,7 +454,7 @@ jobs:
         step => step.name === 'Run Playwright tests'
       );
 
-      expect(testStep.env).toHaveProperty('PLAYWRIGHT_HTML_REPORT');
+      expect(testStep!.env).toHaveProperty('PLAYWRIGHT_HTML_REPORT');
     });
   });
 
@@ -479,7 +480,7 @@ jobs:
       );
 
       expect(installStep).toBeDefined();
-      expect(installStep.run).toBe('npx playwright install --with-deps');
+      expect(installStep!.run).toBe('npx playwright install --with-deps');
     });
 
     it('should preserve non-Cypress action steps', async () => {
@@ -493,9 +494,9 @@ jobs:
       );
 
       expect(checkoutStep).toBeDefined();
-      expect(checkoutStep.uses).toBe('actions/checkout@v3');
+      expect(checkoutStep!.uses).toBe('actions/checkout@v3');
       expect(setupNodeStep).toBeDefined();
-      expect(setupNodeStep.uses).toBe('actions/setup-node@v3');
+      expect(setupNodeStep!.uses).toBe('actions/setup-node@v3');
     });
   });
 

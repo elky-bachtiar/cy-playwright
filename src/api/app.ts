@@ -75,7 +75,7 @@ export class ApiApplication {
         res.status(429).json({
           error: 'Rate limit exceeded',
           code: 'RATE_LIMIT_EXCEEDED',
-          retryAfter: Math.ceil(req.rateLimit.resetTime / 1000)
+          retryAfter: req.rateLimit ? Math.ceil(req.rateLimit.resetTime.getTime() / 1000) : 60
         });
       }
     });

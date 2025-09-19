@@ -14,7 +14,15 @@ describe('API Middleware', () => {
 
     it('should allow requests under rate limit', async () => {
       const mockRateLimiter = RateLimiter as jest.MockedClass<typeof RateLimiter>;
-      mockRateLimiter.prototype.checkLimit.mockResolvedValue({ allowed: true, remaining: 9 });
+      mockRateLimiter.prototype.checkLimit.mockResolvedValue({
+        allowed: true,
+        info: {
+          limit: 10,
+          current: 1,
+          remaining: 9,
+          resetTime: new Date(Date.now() + 60000)
+        }
+      });
 
       const response = await request(app)
         .post('/api/convert/validate')
@@ -28,8 +36,12 @@ describe('API Middleware', () => {
       const mockRateLimiter = RateLimiter as jest.MockedClass<typeof RateLimiter>;
       mockRateLimiter.prototype.checkLimit.mockResolvedValue({
         allowed: false,
-        remaining: 0,
-        resetTime: Date.now() + 60000
+        info: {
+          limit: 10,
+          current: 11,
+          remaining: 0,
+          resetTime: new Date(Date.now() + 60000)
+        }
       });
 
       const response = await request(app)

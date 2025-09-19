@@ -23,7 +23,7 @@ describe('Build Scripts and Automation Conversion', () => {
     jest.clearAllMocks();
 
     // Setup default fs.existsSync behavior
-    mockFs.existsSync.mockImplementation((filePath: string) => {
+    mockFs.existsSync.mockImplementation((filePath) => {
       const pathStr = filePath.toString();
       return pathStr.includes('package.json') ||
              pathStr.includes('Makefile') ||
@@ -31,7 +31,7 @@ describe('Build Scripts and Automation Conversion', () => {
     });
 
     // Setup default fs.readFileSync behavior
-    mockFs.readFileSync.mockImplementation((filePath: string) => {
+    mockFs.readFileSync.mockImplementation((filePath) => {
       const pathStr = filePath.toString();
       if (pathStr.includes('package.json')) {
         return JSON.stringify(mockPackageJson);
