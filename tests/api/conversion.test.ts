@@ -9,9 +9,30 @@ jest.mock('../../src/services/conversion.service');
 jest.mock('../../src/services/repository.service');
 jest.mock('fs-extra');
 
-const mockConversionService = ConversionService as jest.MockedClass<typeof ConversionService>;
-const mockRepositoryService = RepositoryService as jest.MockedClass<typeof RepositoryService>;
-const mockFs = fs as jest.Mocked<typeof fs>;
+// Create explicit mocks to avoid type inference issues
+const mockConversionService = {
+  prototype: {
+    startConversion: jest.fn(),
+    getConversionStatus: jest.fn(),
+    cancelConversion: jest.fn(),
+    getConversionResult: jest.fn()
+  }
+};
+
+const mockRepositoryService = {
+  prototype: {
+    validateRepository: jest.fn()
+  }
+};
+
+const mockFs = {
+  readFile: jest.fn()
+};
+
+// Apply the mocks
+Object.assign(ConversionService, mockConversionService);
+Object.assign(RepositoryService, mockRepositoryService);
+Object.assign(fs, mockFs);
 
 describe('Conversion API Endpoints', () => {
   beforeEach(() => {
@@ -32,18 +53,24 @@ describe('Conversion API Endpoints', () => {
     it('should successfully initiate conversion for valid repository', async () => {
       const mockJobId = 'job-123';
       const mockValidation = {
-        valid: true,
-        cypressVersion: '12.0.0',
-        testFiles: ['cypress/e2e/test1.cy.js'],
-        configFiles: ['cypress.config.js']
+        isValid: true,
+        isCypressProject: true,
+        isPlaywrightProject: false,
+        hasValidStructure: true,
+        issues: [],
+        recommendations: [],
+        projectInfo: {
+          name: 'test-project',
+          version: '1.0.0',
+          dependencies: {
+            'cypress': '12.0.0'
+          },
+          devDependencies: {}
+        }
       };
 
       mockRepositoryService.prototype.validateRepository.mockResolvedValue(mockValidation);
-      mockConversionService.prototype.startConversion.mockResolvedValue({
-        jobId: mockJobId,
-        status: 'started',
-        estimatedDuration: 30000
-      });
+      mockConversionService.prototype.startConversion.mockResolvedValue(mockJobId);
 
       const response = await request(app)
         .post('/api/convert')
@@ -129,9 +156,18 @@ describe('Conversion API Endpoints', () => {
       };
 
       mockRepositoryService.prototype.validateRepository.mockResolvedValue({
-        valid: false,
-        reason: 'Not a Cypress project',
-        suggestions: ['Install Cypress dependencies', 'Add cypress.config.js']
+        isValid: false,
+        isCypressProject: false,
+        isPlaywrightProject: false,
+        hasValidStructure: false,
+        issues: ['Not a Cypress project'],
+        recommendations: ['Install Cypress dependencies', 'Add cypress.config.js'],
+        projectInfo: {
+          name: 'react-project',
+          version: '1.0.0',
+          dependencies: {},
+          devDependencies: {}
+        }
       });
 
       const response = await request(app)
@@ -173,9 +209,20 @@ describe('Conversion API Endpoints', () => {
 
     it('should handle conversion service errors gracefully', async () => {
       mockRepositoryService.prototype.validateRepository.mockResolvedValue({
-        valid: true,
-        cypressVersion: '12.0.0',
-        testFiles: ['cypress/e2e/test1.cy.js']
+        isValid: true,
+        isCypressProject: true,
+        isPlaywrightProject: false,
+        hasValidStructure: true,
+        issues: [],
+        recommendations: [],
+        projectInfo: {
+          name: 'test-project',
+          version: '1.0.0',
+          dependencies: {
+            'cypress': '12.0.0'
+          },
+          devDependencies: {}
+        }
       });
 
       mockConversionService.prototype.startConversion.mockRejectedValue(
@@ -199,14 +246,12 @@ describe('Conversion API Endpoints', () => {
 
     it('should return conversion status for valid job ID', async () => {
       const mockStatus = {
-        jobId: mockJobId,
-        status: 'in_progress',
+        id: mockJobId,
+        status: 'in_progress' as const,
+        repositoryUrl: 'https://github.com/user/cypress-project',
         progress: 45,
-        currentStep: 'Converting test files',
-        filesProcessed: 3,
-        totalFiles: 8,
-        startTime: '2025-01-01T00:00:00Z',
-        estimatedCompletion: '2025-01-01T00:01:30Z'
+        startTime: new Date('2025-01-01T00:00:00Z'),
+        outputPath: './converted-project'
       };
 
       mockConversionService.prototype.getConversionStatus.mockResolvedValue(mockStatus);
@@ -237,19 +282,20 @@ describe('Conversion API Endpoints', () => {
 
     it('should return completed status with download link', async () => {
       const completedStatus = {
-        jobId: mockJobId,
-        status: 'completed',
+        id: mockJobId,
+        status: 'completed' as const,
+        repositoryUrl: 'https://github.com/user/cypress-project',
         progress: 100,
-        currentStep: 'Completed',
-        filesProcessed: 8,
-        totalFiles: 8,
-        startTime: '2025-01-01T00:00:00Z',
-        completionTime: '2025-01-01T00:02:00Z',
-        downloadUrl: `/api/convert/${mockJobId}/download`,
-        validationResults: {
+        startTime: new Date('2025-01-01T00:00:00Z'),
+        endTime: new Date('2025-01-01T00:02:00Z'),
+        outputPath: './converted-project',
+        summary: {
+          filesConverted: 8,
           testsConverted: 15,
-          warningsCount: 2,
-          errorsCount: 0
+          customCommandsConverted: 2,
+          configurationsMigrated: 1,
+          issuesFound: [],
+          warnings: []
         }
       };
 
@@ -264,16 +310,13 @@ describe('Conversion API Endpoints', () => {
 
     it('should return failed status with error details', async () => {
       const failedStatus = {
-        jobId: mockJobId,
-        status: 'failed',
+        id: mockJobId,
+        status: 'failed' as const,
+        repositoryUrl: 'https://github.com/user/cypress-project',
         progress: 30,
-        currentStep: 'Converting test files',
-        filesProcessed: 2,
-        totalFiles: 8,
-        startTime: '2025-01-01T00:00:00Z',
-        failureTime: '2025-01-01T00:01:00Z',
-        error: 'Failed to parse AST for file: complex-test.cy.js',
-        errorCode: 'AST_PARSE_ERROR'
+        startTime: new Date('2025-01-01T00:00:00Z'),
+        endTime: new Date('2025-01-01T00:01:00Z'),
+        errorMessage: 'Failed to parse AST for file: complex-test.cy.js'
       };
 
       mockConversionService.prototype.getConversionStatus.mockResolvedValue(failedStatus);
@@ -294,12 +337,15 @@ describe('Conversion API Endpoints', () => {
       const mockZipBuffer = Buffer.from('mock zip content');
 
       mockConversionService.prototype.getConversionStatus.mockResolvedValue({
-        jobId: mockJobId,
-        status: 'completed'
+        id: mockJobId,
+        repositoryUrl: 'https://github.com/user/cypress-project',
+        status: 'completed',
+        progress: 100,
+        startTime: new Date(),
+        endTime: new Date()
       });
 
-      mockConversionService.prototype.getDownloadPath.mockResolvedValue(mockZipPath);
-      mockFs.readFile.mockResolvedValue(mockZipBuffer);
+      mockConversionService.prototype.getConversionResult.mockResolvedValue(mockZipBuffer);
 
       const response = await request(app)
         .get(`/api/convert/${mockJobId}/download`)
@@ -329,8 +375,11 @@ describe('Conversion API Endpoints', () => {
 
     it('should return 400 for incomplete conversion', async () => {
       mockConversionService.prototype.getConversionStatus.mockResolvedValue({
-        jobId: mockJobId,
-        status: 'in_progress'
+        id: mockJobId,
+        repositoryUrl: 'https://github.com/user/cypress-project',
+        status: 'in_progress',
+        progress: 50,
+        startTime: new Date()
       });
 
       const response = await request(app)
@@ -345,12 +394,15 @@ describe('Conversion API Endpoints', () => {
 
     it('should return 500 for missing download file', async () => {
       mockConversionService.prototype.getConversionStatus.mockResolvedValue({
-        jobId: mockJobId,
-        status: 'completed'
+        id: mockJobId,
+        repositoryUrl: 'https://github.com/user/cypress-project',
+        status: 'completed',
+        progress: 100,
+        startTime: new Date(),
+        endTime: new Date()
       });
 
-      mockConversionService.prototype.getDownloadPath.mockResolvedValue('/path/to/missing.zip');
-      (mockFs.readFile as jest.MockedFunction<any>).mockRejectedValue(new Error('ENOENT: no such file or directory'));
+      mockConversionService.prototype.getConversionResult.mockResolvedValue(null);
 
       const response = await request(app)
         .get(`/api/convert/${mockJobId}/download`)
@@ -368,8 +420,11 @@ describe('Conversion API Endpoints', () => {
 
     it('should successfully cancel ongoing conversion', async () => {
       mockConversionService.prototype.getConversionStatus.mockResolvedValue({
-        jobId: mockJobId,
-        status: 'in_progress'
+        id: mockJobId,
+        repositoryUrl: 'https://github.com/user/cypress-project',
+        status: 'in_progress',
+        progress: 50,
+        startTime: new Date()
       });
 
       mockConversionService.prototype.cancelConversion.mockResolvedValue(true);
@@ -401,8 +456,11 @@ describe('Conversion API Endpoints', () => {
 
     it('should return 400 for already completed job', async () => {
       mockConversionService.prototype.getConversionStatus.mockResolvedValue({
-        jobId: mockJobId,
-        status: 'completed'
+        id: mockJobId,
+        status: 'completed',
+        repositoryUrl: 'https://github.com/test/repo',
+        progress: 100,
+        startTime: new Date()
       });
 
       const response = await request(app)
@@ -423,23 +481,18 @@ describe('Conversion API Endpoints', () => {
       };
 
       const mockValidation = {
-        valid: true,
-        cypressVersion: '12.0.0',
-        testFiles: ['cypress/e2e/test1.cy.js', 'cypress/e2e/test2.cy.js'],
-        configFiles: ['cypress.config.js'],
-        supportFiles: ['cypress/support/e2e.js'],
-        customCommands: [
-          { name: 'login', file: 'cypress/support/commands.js', lineNumber: 10 }
-        ],
-        estimatedConversionTime: 45000,
-        complexity: 'medium',
-        potentialIssues: [
-          {
-            type: 'warning',
-            message: 'Custom commands detected - may require manual review',
-            files: ['cypress/support/commands.js']
-          }
-        ]
+        isValid: true,
+        isCypressProject: true,
+        isPlaywrightProject: false,
+        hasValidStructure: true,
+        issues: [],
+        recommendations: ['Consider using semantic locators for better maintainability'],
+        projectInfo: {
+          name: 'cypress-project',
+          version: '1.0.0',
+          dependencies: { cypress: '12.0.0' },
+          devDependencies: {}
+        }
       };
 
       mockRepositoryService.prototype.validateRepository.mockResolvedValue(mockValidation);

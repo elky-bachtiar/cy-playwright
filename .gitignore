@@ -44,3 +44,5 @@ tmp/
 # conversion directory
 .conversion/
 converted-projects/
+
+tests/e2e/dla/

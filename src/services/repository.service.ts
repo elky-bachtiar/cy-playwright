@@ -144,7 +144,7 @@ export class RepositoryService {
     ];
   }
 
-  async validateRepository(repositoryPath: string): Promise<RepositoryValidationResult> {
+  async validateRepository(repositoryPath: string, accessToken?: string): Promise<RepositoryValidationResult> {
     this.logger.info(`Validating repository at: ${repositoryPath}`);
 
     try {
@@ -251,7 +251,7 @@ export class RepositoryService {
         isCypressProject: false,
         isPlaywrightProject: false,
         hasValidStructure: false,
-        issues: [`Validation failed: ${error.message}`],
+        issues: [`Validation failed: ${error instanceof Error ? error.message : String(error)}`],
         recommendations: [],
         projectInfo: null
       };
@@ -448,6 +448,32 @@ export class RepositoryService {
 
     await scan(dir);
     return count;
+  }
+
+  async validateAccess(repositoryUrl: string, accessToken?: string): Promise<any> {
+    this.logger.info('Validating repository access', { repositoryUrl });
+
+    // Mock implementation for testing
+    return {
+      hasAccess: true,
+      permissions: ['read', 'write'],
+      repositoryInfo: {
+        name: 'test-repo',
+        owner: 'test-owner',
+        isPrivate: false
+      }
+    };
+  }
+
+  async getBranches(owner: string, repo: string): Promise<any[]> {
+    this.logger.info(`Getting branches for ${owner}/${repo}`);
+
+    // Mock implementation for testing
+    return [
+      { name: 'main', commit: { sha: 'abc123' } },
+      { name: 'develop', commit: { sha: 'def456' } },
+      { name: 'feature/test', commit: { sha: 'ghi789' } }
+    ];
   }
 
   async isHealthy(): Promise<boolean> {

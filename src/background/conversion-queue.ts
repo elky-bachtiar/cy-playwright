@@ -1,6 +1,10 @@
 import Bull from 'bull';
 import { Logger } from '../utils/logger';
 import { ConversionService } from '../services/conversion.service';
+import { GitHubService } from '../services/github.service';
+import { RepositoryService } from '../services/repository.service';
+import { AnalysisService } from '../services/analysis.service';
+import { ReportingService } from '../services/reporting.service';
 import { ConversionRequest, ConversionStatus } from '../types/api.types';
 
 export interface ConversionJobData extends ConversionRequest {
@@ -29,7 +33,19 @@ export class ConversionQueue {
 
   constructor(config: any) {
     this.config = config;
-    this.conversionService = new ConversionService();
+
+    // Initialize required services
+    const githubService = new GitHubService();
+    const repositoryService = new RepositoryService();
+    const analysisService = new AnalysisService();
+    const reportingService = new ReportingService();
+
+    this.conversionService = new ConversionService(
+      githubService,
+      repositoryService,
+      analysisService,
+      reportingService
+    );
   }
 
   async initialize(): Promise<void> {

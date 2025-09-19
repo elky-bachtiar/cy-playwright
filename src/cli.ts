@@ -72,6 +72,7 @@ export class CLI {
       .option('-o, --output <path>', 'Output directory for converted Playwright project', './playwright-project')
       .option('--preserve-structure', 'Preserve original directory structure', false)
       .option('--generate-page-objects', 'Generate page object models from custom commands', true)
+      .option('--auto-select', 'Automatically select the first valid Cypress project (non-interactive)', false)
       .option('-v, --verbose', 'Enable verbose logging', false)
       .action(async (options) => {
         await this.handleGitHubConversion({
@@ -79,6 +80,7 @@ export class CLI {
           outputDir: options.output,
           preserveStructure: options.preserveStructure,
           generatePageObjects: options.generatePageObjects,
+          autoSelect: options.autoSelect,
           verbose: options.verbose
         });
       });
@@ -90,6 +92,7 @@ export class CLI {
       .option('-o, --output <path>', 'Output directory for converted Playwright project', './playwright-project')
       .option('--preserve-structure', 'Preserve original directory structure', false)
       .option('--generate-page-objects', 'Generate page object models from custom commands', true)
+      .option('--auto-select', 'Automatically select the first valid Cypress project (non-interactive)', false)
       .option('-v, --verbose', 'Enable verbose logging', false)
       .action(async (options) => {
         await this.handleGitLabConversion({
@@ -97,6 +100,7 @@ export class CLI {
           outputDir: options.output,
           preserveStructure: options.preserveStructure,
           generatePageObjects: options.generatePageObjects,
+          autoSelect: options.autoSelect,
           verbose: options.verbose
         });
       });
@@ -413,7 +417,7 @@ export class CLI {
     configFile?: string;
     testCount: number;
     confidence: 'high' | 'medium' | 'low';
-  }>): Promise<string | null> {
+  }>, autoSelect = false): Promise<string | null> {
     if (projects.length === 0) {
       console.log('❌ No Cypress projects found in the repository.');
       return null;
@@ -424,6 +428,22 @@ export class CLI {
       console.log(`✅ Found single Cypress project: ${project.relativePath}`);
       console.log(`   Config: ${project.configFile ? '✅' : '❌'} | Tests: ${project.testCount} | Confidence: ${project.confidence}`);
       return project.path;
+    }
+
+    // Auto-select the first valid project if autoSelect is enabled
+    if (autoSelect) {
+      // Sort projects by confidence and test count to pick the best candidate
+      const sortedProjects = projects.sort((a, b) => {
+        const confidenceOrder = { high: 3, medium: 2, low: 1 };
+        const scoreA = confidenceOrder[a.confidence] * 100 + a.testCount;
+        const scoreB = confidenceOrder[b.confidence] * 100 + b.testCount;
+        return scoreB - scoreA;
+      });
+
+      const selectedProject = sortedProjects[0];
+      console.log(`🤖 Auto-selecting best Cypress project: ${selectedProject.relativePath}`);
+      console.log(`   Config: ${selectedProject.configFile ? '✅' : '❌'} | Tests: ${selectedProject.testCount} | Confidence: ${selectedProject.confidence}`);
+      return selectedProject.path;
     }
 
     console.log(`\n🔍 Found ${projects.length} potential Cypress projects:`);
@@ -740,6 +760,7 @@ export class CLI {
     outputDir: string;
     preserveStructure: boolean;
     generatePageObjects: boolean;
+    autoSelect: boolean;
     verbose: boolean;
   }): Promise<void> {
     console.log('🚀 Starting GitHub repository conversion...');
@@ -767,9 +788,15 @@ export class CLI {
 
       clonedPath = path.join(conversionDir, `${repoInfo.owner}-${repoInfo.repo}`);
 
+      // Detect the actual default branch before cloning
+      console.log('🔍 Detecting default branch...');
+      const actualBranch = await this.githubRepo.detectDefaultBranch(options.githubUrl);
+      console.log(`📋 Using branch: ${actualBranch}`);
+
       console.log(`📥 Cloning repository to: ${clonedPath}`);
 
       const cloneResult = await this.githubRepo.cloneRepository(options.githubUrl, clonedPath, {
+        branch: actualBranch,
         clean: true,
         depth: 0, // Full clone to get all examples and branches
         retries: 2
@@ -796,7 +823,7 @@ export class CLI {
       const scanResult = await this.scanForCypressProjects(clonedPath);
 
       // Step 5: Select project directory (interactive if multiple found)
-      const selectedProjectPath = await this.selectCypressProject(scanResult.projects);
+      const selectedProjectPath = await this.selectCypressProject(scanResult.projects, options.autoSelect);
       if (!selectedProjectPath) {
         console.log('❌ Conversion cancelled or no valid project selected.');
         process.exit(1);
@@ -849,6 +876,7 @@ export class CLI {
     outputDir: string;
     preserveStructure: boolean;
     generatePageObjects: boolean;
+    autoSelect: boolean;
     verbose: boolean;
   }): Promise<void> {
     console.log('🚀 Starting GitLab repository conversion...');
@@ -876,9 +904,15 @@ export class CLI {
 
       clonedPath = path.join(conversionDir, `${repoInfo.owner}-${repoInfo.repo}`);
 
+      // Detect the actual default branch before cloning
+      console.log('🔍 Detecting default branch...');
+      const actualBranch = await this.gitlabRepo.detectDefaultBranch(options.gitlabUrl);
+      console.log(`📋 Using branch: ${actualBranch}`);
+
       console.log(`📥 Cloning repository to: ${clonedPath}`);
 
       const cloneResult = await this.gitlabRepo.cloneRepository(options.gitlabUrl, clonedPath, {
+        branch: actualBranch,
         clean: true,
         depth: 0, // Full clone to get all examples and branches
         retries: 2
@@ -905,7 +939,7 @@ export class CLI {
       const scanResult = await this.scanForCypressProjects(clonedPath);
 
       // Step 6: Select project directory (interactive if multiple found)
-      const selectedProjectPath = await this.selectCypressProject(scanResult.projects);
+      const selectedProjectPath = await this.selectCypressProject(scanResult.projects, options.autoSelect);
       if (!selectedProjectPath) {
         console.log('❌ Conversion cancelled or no valid project selected.');
         process.exit(1);
@@ -982,6 +1016,7 @@ export class CLI {
           outputDir: options.outputDir,
           preserveStructure: options.preserveStructure,
           generatePageObjects: options.generatePageObjects,
+          autoSelect: false, // Default to false for convert-repo command
           verbose: options.verbose
         });
         break;
@@ -992,6 +1027,7 @@ export class CLI {
           outputDir: options.outputDir,
           preserveStructure: options.preserveStructure,
           generatePageObjects: options.generatePageObjects,
+          autoSelect: false, // Default to false for convert-repo command
           verbose: options.verbose
         });
         break;

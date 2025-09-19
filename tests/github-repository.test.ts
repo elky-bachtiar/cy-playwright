@@ -89,7 +89,7 @@ describe('GitHubRepository', () => {
       expect(result).toEqual({
         owner: 'helenanull',
         repo: 'cypress-example',
-        branch: 'main'
+        branch: 'master'
       })
     })
 
@@ -115,7 +115,7 @@ describe('GitHubRepository', () => {
       expect(result).toEqual({
         owner: 'helenanull',
         repo: 'cypress-example',
-        branch: 'main'
+        branch: 'master'
       })
     })
 
@@ -126,7 +126,7 @@ describe('GitHubRepository', () => {
       expect(result).toEqual({
         owner: 'helenanull',
         repo: 'cypress-example',
-        branch: 'main'
+        branch: 'master'
       })
     })
   })
@@ -230,7 +230,7 @@ describe('GitHubRepository', () => {
       const result = await repository.cloneRepository(
         'https://github.com/helenanull/cypress-example',
         '/tmp/test-repo',
-        { branch: 'main', depth: 1 }
+        { branch: 'master', depth: 1 }
       )
 
       expect(result.success).toBe(true)

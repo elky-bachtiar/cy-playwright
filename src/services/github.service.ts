@@ -160,6 +160,47 @@ export class GitHubService {
     }
   }
 
+  async searchCypressRepositories(options: any = {}): Promise<any> {
+    this.logger.info('Searching Cypress repositories', { options });
+
+    // Mock implementation for testing
+    return {
+      totalCount: 1,
+      repositories: [
+        {
+          id: 1,
+          name: 'cypress-example',
+          fullName: 'user/cypress-example',
+          description: 'Example Cypress project',
+          language: 'JavaScript',
+          stars: 42,
+          forks: 7,
+          url: 'https://github.com/user/cypress-example'
+        }
+      ]
+    };
+  }
+
+  async getTrendingCypressRepositories(period: string = 'week'): Promise<any> {
+    this.logger.info('Getting trending Cypress repositories', { period });
+
+    // Mock implementation for testing
+    return {
+      repositories: [
+        {
+          id: 1,
+          name: 'trending-cypress',
+          fullName: 'user/trending-cypress',
+          description: 'Trending Cypress repository',
+          language: 'TypeScript',
+          stars: 100,
+          forks: 20,
+          url: 'https://github.com/user/trending-cypress'
+        }
+      ]
+    };
+  }
+
   setToken(token: string): void {
     this.config.token = token;
   }

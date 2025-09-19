@@ -1,0 +1,3 @@
+# Spec Summary (Lite)
+
+Enhance the cy-playwright conversion tool to handle unusual but valid Cypress page object patterns including inheritance chains, dynamic method generation, composition patterns, and circular references. This feature ensures robust conversion of edge cases that currently cause failures, improving the tool's success rate when processing real-world projects with complex page object architectures. The goal is to convert "weird but valid" patterns to functionally equivalent Playwright code while maintaining type safety and semantic equivalence.

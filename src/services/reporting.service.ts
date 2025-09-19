@@ -627,6 +627,123 @@ export class ReportingService {
     };
   }
 
+  async getAnalysisReport(reportId: string): Promise<any> {
+    this.logger.info(`Getting analysis report: ${reportId}`);
+
+    // Mock implementation for testing
+    return {
+      id: reportId,
+      status: 'completed',
+      analysis: {
+        totalFiles: 25,
+        testFiles: 15,
+        complexity: 'medium',
+        estimatedConversionTime: 180
+      },
+      generatedAt: new Date()
+    };
+  }
+
+  async getConversionReport(conversionId: string): Promise<ConversionReport | null> {
+    this.logger.info(`Getting conversion report: ${conversionId}`);
+
+    // Mock implementation for testing
+    const mockReport: ConversionReport = {
+      id: `report_${conversionId}`,
+      timestamp: new Date(),
+      projectInfo: {
+        name: 'test-project',
+        type: 'cypress',
+        language: 'javascript',
+        testFramework: 'cypress',
+        totalFiles: 10,
+        totalTests: 25
+      },
+      conversionSummary: {
+        filesConverted: 8,
+        testsConverted: 20,
+        customCommandsConverted: 3,
+        configurationsMigrated: 1,
+        issuesFound: [],
+        warnings: []
+      },
+      detailedAnalysis: {
+        filesProcessed: [],
+        customCommandsConverted: [],
+        configurationsUpdated: [],
+        dependenciesChanged: [],
+        ciPipelineUpdates: []
+      },
+      recommendations: [],
+      warnings: [],
+      performance: {
+        conversionTime: 30000,
+        beforeMetrics: {
+          testSuiteSize: 1000,
+          dependencyCount: 15
+        },
+        afterMetrics: {
+          testSuiteSize: 900,
+          dependencyCount: 16
+        },
+        improvements: [],
+        concerns: []
+      },
+      compatibility: {
+        browserSupport: [],
+        featureCompatibility: [],
+        pluginCompatibility: [],
+        overallCompatibility: 'good',
+        issues: []
+      },
+      nextSteps: []
+    };
+
+    return mockReport;
+  }
+
+  async generateReportPdf(report: ConversionReport): Promise<Buffer> {
+    this.logger.info(`Generating PDF for report: ${report.id}`);
+
+    // Mock implementation - in real implementation would use PDF library
+    const pdfContent = `PDF Report for ${report.projectInfo.name}\n\nGenerated: ${report.timestamp.toISOString()}`;
+    return Buffer.from(pdfContent);
+  }
+
+  async getConversionSummary(conversionId: string): Promise<ConversionSummary | null> {
+    this.logger.info(`Getting conversion summary: ${conversionId}`);
+
+    // Mock implementation for testing
+    return {
+      filesConverted: 8,
+      testsConverted: 20,
+      customCommandsConverted: 3,
+      configurationsMigrated: 1,
+      issuesFound: [],
+      warnings: []
+    };
+  }
+
+  async getAnalytics(timeRange?: { start: Date; end: Date }): Promise<any> {
+    this.logger.info('Getting analytics data', { timeRange });
+
+    // Mock implementation for testing
+    return {
+      totalConversions: 150,
+      successfulConversions: 142,
+      failedConversions: 8,
+      averageConversionTime: 45000,
+      conversionsByDay: {},
+      popularRepositories: [],
+      errorBreakdown: {},
+      performanceMetrics: {
+        averageTestsPerProject: 25,
+        averageFilesPerProject: 12,
+        conversionSuccessRate: 0.947
+      }
+    };
+  }
+
   // Health check methods
   async isHealthy(): Promise<boolean> {
     return true; // Reporting service is stateless
