@@ -350,4 +350,25 @@ export class HealthService {
   getUptime(): number {
     return Math.floor((Date.now() - this.startTime) / 1000);
   }
+
+  // Missing API methods for routes
+  async getBasicHealth(): Promise<HealthStatus> {
+    return this.getHealth();
+  }
+
+  async getReadiness(): Promise<{ ready: boolean; status: string; checks: ServiceHealth[] }> {
+    const health = await this.getHealth();
+    return {
+      ready: health.status === 'healthy',
+      status: health.status,
+      checks: health.services
+    };
+  }
+
+  async getLiveness(): Promise<{ alive: boolean; uptime: number }> {
+    return {
+      alive: true,
+      uptime: this.getUptime()
+    };
+  }
 }

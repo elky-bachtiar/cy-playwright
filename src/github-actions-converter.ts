@@ -392,15 +392,15 @@ export class GitHubActionsConverter {
 
         if (path.includes('cypress/screenshots')) {
           convertedStep.with.path = 'test-results/';
-          convertedStep.name = step.name.replace(/screenshot/gi, 'trace');
+          convertedStep.name = 'Upload trace files';
           if (step.with.name) {
-            convertedStep.with.name = step.with.name.toString().replace(/screenshot/gi, 'traces');
+            convertedStep.with.name = step.with.name.toString().replace(/cypress-screenshots/gi, 'playwright-traces');
           }
         } else if (path.includes('cypress/videos')) {
           convertedStep.with.path = 'playwright-report/';
-          convertedStep.name = step.name.replace(/video/gi, 'test results');
+          convertedStep.name = 'Upload test results';
           if (step.with.name) {
-            convertedStep.with.name = step.with.name.toString().replace(/video/gi, 'report');
+            convertedStep.with.name = step.with.name.toString().replace(/cypress-videos/gi, 'playwright-report');
           }
         }
       }

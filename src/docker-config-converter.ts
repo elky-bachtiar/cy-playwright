@@ -145,22 +145,55 @@ export class DockerConfigConverter {
 
     const commands: DockerfileCommand[] = [];
     let baseImage = '';
+    let currentCommand: DockerfileCommand | null = null;
 
     for (const line of lines) {
       const trimmedLine = line.trim();
-      const parts = trimmedLine.split(/\s+/);
-      const instruction = parts[0].toUpperCase();
-      const args = parts.slice(1).join(' ');
 
-      if (instruction === 'FROM') {
-        baseImage = args.split(' ')[0]; // Get image name, ignore AS alias
+      // Handle line continuations
+      if (currentCommand && trimmedLine && !trimmedLine.match(/^[A-Z]+\s/)) {
+        // This is a continuation of the previous command
+        currentCommand.args += ' ' + trimmedLine.replace(/\\\s*$/, '').trim();
+        currentCommand.original += '\n' + line;
+        continue;
       }
 
-      commands.push({
-        instruction,
-        args,
-        original: trimmedLine
-      });
+      // Finish previous command if exists
+      if (currentCommand) {
+        commands.push(currentCommand);
+        currentCommand = null;
+      }
+
+      // Start new command
+      if (trimmedLine) {
+        const parts = trimmedLine.split(/\s+/);
+        const instruction = parts[0].toUpperCase();
+        let args = parts.slice(1).join(' ');
+
+        // Remove line continuation backslash
+        args = args.replace(/\\\s*$/, '').trim();
+
+        if (instruction === 'FROM') {
+          baseImage = args.split(' ')[0]; // Get image name, ignore AS alias
+        }
+
+        currentCommand = {
+          instruction,
+          args,
+          original: line
+        };
+
+        // If this line doesn't end with continuation, add it immediately
+        if (!line.trim().endsWith('\\')) {
+          commands.push(currentCommand);
+          currentCommand = null;
+        }
+      }
+    }
+
+    // Add final command if exists
+    if (currentCommand) {
+      commands.push(currentCommand);
     }
 
     return {
@@ -224,6 +257,7 @@ export class DockerConfigConverter {
     }
 
     // Process other commands
+    let playwrightDepsAdded = false;
     for (const command of parsed.commands) {
       if (command.instruction === 'FROM') {
         continue; // Already handled above
@@ -234,6 +268,9 @@ export class DockerConfigConverter {
       // Convert RUN commands
       if (command.instruction === 'RUN') {
         convertedCommand = this.convertRunCommand(command.args, options);
+        if (convertedCommand.includes('npx playwright install-deps')) {
+          playwrightDepsAdded = true;
+        }
       }
 
       // Convert ENV commands
@@ -259,9 +296,9 @@ export class DockerConfigConverter {
       convertedCommands.push(convertedCommand);
     }
 
-    // Add Playwright-specific setup if needed
-    const needsPlaywrightSetup = content.includes('google-chrome-stable') ||
-                                content.includes('cypress/included');
+    // Add Playwright-specific setup if needed and not already added
+    const needsPlaywrightSetup = (content.includes('google-chrome-stable') ||
+                                content.includes('cypress/included')) && !playwrightDepsAdded;
 
     if (needsPlaywrightSetup) {
       // Add Playwright dependencies installation
@@ -457,22 +494,30 @@ export class DockerConfigConverter {
   private convertDockerComposeEnvironment(environment: any): any {
     if (Array.isArray(environment)) {
       return environment
-        .filter(env => !this.cypressEnvironmentPatterns.some(pattern => env.includes(pattern)))
         .map(env => {
+          // Convert known Cypress variables to Playwright equivalents
           if (env.includes('CYPRESS_baseUrl')) {
             return env.replace('CYPRESS_baseUrl', 'PLAYWRIGHT_baseURL');
           }
           return env;
+        })
+        .filter(env => {
+          // Filter out unconvertable Cypress-specific variables
+          return !this.cypressEnvironmentPatterns.some(pattern =>
+            pattern !== 'CYPRESS_' && env.includes(pattern)
+          ) && !env.includes('CYPRESS_RECORD_KEY');
         });
     } else {
       const convertedEnv: any = {};
       for (const [key, value] of Object.entries(environment)) {
-        if (!this.cypressEnvironmentPatterns.some(pattern => key.includes(pattern))) {
-          if (key === 'CYPRESS_baseUrl') {
-            convertedEnv.PLAYWRIGHT_baseURL = value;
-          } else {
-            convertedEnv[key] = value;
-          }
+        // Convert known Cypress variables to Playwright equivalents
+        if (key === 'CYPRESS_baseUrl') {
+          convertedEnv.PLAYWRIGHT_baseURL = value;
+        } else if (!this.cypressEnvironmentPatterns.some(pattern =>
+          pattern !== 'CYPRESS_' && key.includes(pattern)
+        ) && !key.includes('CYPRESS_RECORD_KEY')) {
+          // Keep other non-Cypress variables
+          convertedEnv[key] = value;
         }
       }
       return convertedEnv;
@@ -485,10 +530,10 @@ export class DockerConfigConverter {
   private convertDockerComposeVolumes(volumes: string[]): string[] {
     return volumes.map(volume => {
       if (volume.includes('cypress/videos')) {
-        return volume.replace('cypress/videos', 'test-results');
+        return volume.replace(/.*cypress\/videos.*/g, './test-results:/app/test-results');
       }
       if (volume.includes('cypress/screenshots')) {
-        return volume.replace('cypress/screenshots', 'playwright-report');
+        return volume.replace(/.*cypress\/screenshots.*/g, './playwright-report:/app/playwright-report');
       }
       return volume;
     });

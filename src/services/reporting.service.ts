@@ -6,6 +6,7 @@ import { MetricSummary } from './metrics.service';
 export interface ConversionReport {
   id: string;
   timestamp: Date;
+  status: 'pending' | 'in_progress' | 'completed' | 'failed';
   projectInfo: ProjectBasicInfo;
   conversionSummary: ConversionSummary;
   detailedAnalysis: DetailedConversionAnalysis;
@@ -173,6 +174,7 @@ export class ReportingService {
       const report: ConversionReport = {
         id: `report_${conversionResult.id}`,
         timestamp: new Date(),
+        status: 'completed',
         projectInfo,
         conversionSummary: conversionResult.summary || this.createEmptyConversionSummary(),
         detailedAnalysis,
@@ -651,6 +653,7 @@ export class ReportingService {
     const mockReport: ConversionReport = {
       id: `report_${conversionId}`,
       timestamp: new Date(),
+      status: 'completed',
       projectInfo: {
         name: 'test-project',
         type: 'cypress',
@@ -753,6 +756,85 @@ export class ReportingService {
     return {
       service: 'ReportingService',
       status: 'healthy'
+    };
+  }
+
+  // Missing API methods for routes
+  async generateReportExcel(reportId: string): Promise<{ downloadUrl: string }> {
+    this.logger.info(`Generating Excel report: ${reportId}`);
+
+    // TODO: Implement actual Excel generation
+    return {
+      downloadUrl: `/api/reports/${reportId}/download/excel`
+    };
+  }
+
+  async generateCustomReport(template: string, data: any): Promise<{ reportId: string }> {
+    this.logger.info(`Generating custom report with template: ${template}`);
+
+    const reportId = `custom-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    // TODO: Implement actual custom report generation
+    return { reportId };
+  }
+
+  async getCustomReportStatus(reportId: string): Promise<{
+    status: string;
+    progress: number;
+    format?: string;
+    name?: string;
+  }> {
+    this.logger.info(`Getting custom report status: ${reportId}`);
+
+    // TODO: Implement actual status tracking
+    return {
+      status: 'completed',
+      progress: 100,
+      format: 'pdf',
+      name: `Custom Report ${reportId}`
+    };
+  }
+
+  async downloadCustomReport(reportId: string): Promise<Buffer> {
+    this.logger.info(`Downloading custom report: ${reportId}`);
+
+    // TODO: Implement actual download
+    return Buffer.from(`Custom report ${reportId} content`);
+  }
+
+  async getReportTemplates(): Promise<any[]> {
+    this.logger.info('Getting report templates');
+
+    // TODO: Implement actual template management
+    return [
+      { id: 'summary', name: 'Conversion Summary', description: 'Basic conversion metrics' },
+      { id: 'detailed', name: 'Detailed Analysis', description: 'Comprehensive conversion analysis' }
+    ];
+  }
+
+  async exportData(format: string, filters: any): Promise<{ downloadUrl: string }> {
+    this.logger.info(`Exporting data in format: ${format}`, { filters });
+
+    // TODO: Implement actual data export
+    return {
+      downloadUrl: `/api/exports/${Date.now()}.${format}`
+    };
+  }
+
+  async getReportHistory(limit: number = 50, offset: number = 0): Promise<{
+    items: any[];
+    total: number;
+    limit: number;
+    offset: number;
+  }> {
+    this.logger.info(`Getting report history`, { limit, offset });
+
+    // TODO: Implement actual report history
+    return {
+      items: [],
+      total: 0,
+      limit,
+      offset
     };
   }
 }

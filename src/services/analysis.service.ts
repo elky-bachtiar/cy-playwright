@@ -785,4 +785,46 @@ export class AnalysisService {
     // Implementation would go here
     throw new Error('Method not implemented');
   }
+
+  // Missing API methods for routes
+  async startBackgroundAnalysis(repositoryUrl: string, options?: any): Promise<{
+    analysisId: string;
+    jobId: string;
+    status: string;
+    estimatedDuration: number;
+    queuePosition: number;
+  }> {
+    this.logger.info(`Starting background analysis for: ${repositoryUrl}`);
+    const analysisId = `analysis-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    // TODO: Implement actual background analysis queue integration
+    return {
+      analysisId,
+      jobId: analysisId,
+      status: 'queued',
+      estimatedDuration: 120000, // 2 minutes
+      queuePosition: 0
+    };
+  }
+
+  async getAnalysisStatus(analysisId: string): Promise<{ status: string; progress: number; result?: any }> {
+    this.logger.info(`Getting analysis status for: ${analysisId}`);
+
+    // TODO: Implement actual status tracking
+    return {
+      status: 'completed',
+      progress: 100,
+      result: {
+        analysisId,
+        completedAt: new Date().toISOString()
+      }
+    };
+  }
+
+  async cancelAnalysis(analysisId: string): Promise<{ cancelled: boolean }> {
+    this.logger.info(`Cancelling analysis: ${analysisId}`);
+
+    // TODO: Implement actual cancellation logic
+    return { cancelled: true };
+  }
 }

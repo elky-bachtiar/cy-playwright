@@ -30,6 +30,11 @@ export interface ProjectValidationResult {
   recommendations: string[];
   blockers: string[];
   executionResults?: ExecutionValidationResult[];
+  executableTests?: number;
+  failingTests?: number;
+  environmentIssues?: number;
+  dependencyIssues?: number;
+  executionErrors?: string[];
 }
 
 export interface ExecutionOptions {
@@ -117,7 +122,12 @@ export class ExecutionValidator {
       browsersValid: false,
       recommendations: [],
       blockers: [],
-      executionResults: []
+      executionResults: [],
+      executableTests: 0,
+      failingTests: 0,
+      environmentIssues: 0,
+      dependencyIssues: 0,
+      executionErrors: []
     };
 
     try {
