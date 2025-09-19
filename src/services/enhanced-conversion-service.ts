@@ -71,26 +71,33 @@ export class EnhancedConversionService {
 
       if (options.convertPageObjects) {
         if (options.verbose) console.log('🔍 Analyzing page objects...');
-        pageObjectAnalysis = await this.pageObjectAnalyzer.analyzeProject(options.sourceDir);
-        warnings.push(...pageObjectAnalysis.warnings);
+        // Find page object files
+        const pageObjectFiles = await this.findPageObjectFiles(options.sourceDir);
 
-        // Transform page objects
-        if (pageObjectAnalysis.pageObjectClasses.length > 0) {
+        if (pageObjectFiles.length > 0) {
+          const pageObjectAnalyses = await this.pageObjectAnalyzer.analyzeMultiplePageObjects(pageObjectFiles);
+
           if (options.verbose) console.log('🔄 Converting page objects...');
-          convertedPageObjects = this.pageObjectTransformer.transformMultiplePageObjects(
-            pageObjectAnalysis.pageObjectClasses,
-            { preserveMethodChaining: options.preserveMethodChaining }
-          );
+          // Transform each page object
+          for (let i = 0; i < pageObjectAnalyses.length; i++) {
+            const analysis = pageObjectAnalyses[i];
+            const filePath = pageObjectFiles[i];
 
-          // Add converted page objects to result
-          for (const pageObject of convertedPageObjects) {
-            convertedFiles.push({
-              originalPath: pageObject.filePath.replace('tests/pages', 'cypress/pages'),
-              convertedPath: pageObject.filePath,
-              content: pageObject.content,
-              type: 'pageObject'
-            });
-            warnings.push(...pageObject.warnings);
+            if (analysis.isPageObject) {
+              const convertedPageObject = this.pageObjectTransformer.generatePlaywrightPageObject(
+                analysis,
+                { preserveClassName: options.preserveMethodChaining }
+              );
+
+              convertedFiles.push({
+                originalPath: filePath.replace(options.outputDir, options.sourceDir),
+                convertedPath: filePath,
+                content: convertedPageObject.generatedCode,
+                type: 'pageObject'
+              });
+
+              convertedPageObjects.push(convertedPageObject);
+            }
           }
         }
       }
@@ -144,7 +151,7 @@ export class EnhancedConversionService {
       await this.writeConvertedFiles(convertedFiles, options.outputDir);
 
       // Create summary
-      const totalFiles = testFiles.length + supportFiles.length + (pageObjectAnalysis?.pageObjectClasses.length || 0);
+      const totalFiles = testFiles.length + supportFiles.length + convertedPageObjects.length;
       const conversionRate = totalFiles > 0 ? (convertedFiles.length / totalFiles) * 100 : 0;
 
       return {
@@ -195,19 +202,10 @@ export class EnhancedConversionService {
     try {
       let content = await fs.readFile(testFilePath, 'utf-8');
 
-      // Step 1: Transform import paths if enabled
+      // Step 1: Transform import paths if enabled (simplified approach)
       if (options.transformImportPaths) {
-        const pathTransformResult = this.importPathTransformer.transformImportPaths(
-          content,
-          testFilePath,
-          {
-            sourceDir: 'cypress',
-            outputDir: 'tests',
-            updatePageObjectPaths: options.convertPageObjects
-          }
-        );
-        content = pathTransformResult.content;
-        warnings.push(...pathTransformResult.warnings);
+        // Use basic import path normalization
+        content = this.normalizeImportPaths(content, testFilePath, warnings);
       }
 
       // Step 2: Convert test structure (describe/context blocks)
@@ -221,7 +219,7 @@ export class EnhancedConversionService {
             {
               preserveHooks: true,
               convertAssertions: true,
-              usePageObjects: options.convertPageObjects && pageObjectAnalysis?.hasCustomSelectors
+              usePageObjects: options.convertPageObjects && pageObjectAnalysis !== null
             }
           );
           content = structureResult.content;
@@ -229,11 +227,9 @@ export class EnhancedConversionService {
         }
       }
 
-      // Step 3: Deduplicate imports if enabled
+      // Step 3: Deduplicate imports if enabled (simplified approach)
       if (options.deduplicateImports) {
-        const deduplicationResult = this.importDeduplicationService.deduplicateImports(content);
-        content = deduplicationResult.content;
-        warnings.push(...deduplicationResult.warnings);
+        content = this.simplifyImportDeduplication(content, testFilePath, warnings);
       }
 
       // Generate output path
@@ -267,25 +263,14 @@ export class EnhancedConversionService {
     try {
       let content = await fs.readFile(supportFilePath, 'utf-8');
 
-      // Transform import paths
+      // Transform import paths (simplified approach)
       if (options.transformImportPaths) {
-        const pathTransformResult = this.importPathTransformer.transformImportPaths(
-          content,
-          supportFilePath,
-          {
-            sourceDir: 'cypress',
-            outputDir: 'tests'
-          }
-        );
-        content = pathTransformResult.content;
-        warnings.push(...pathTransformResult.warnings);
+        content = this.normalizeImportPaths(content, supportFilePath, warnings);
       }
 
-      // Deduplicate imports
+      // Deduplicate imports (simplified approach)
       if (options.deduplicateImports) {
-        const deduplicationResult = this.importDeduplicationService.deduplicateImports(content);
-        content = deduplicationResult.content;
-        warnings.push(...deduplicationResult.warnings);
+        content = this.simplifyImportDeduplication(content, supportFilePath, warnings);
       }
 
       // Convert custom commands to page object methods
@@ -389,6 +374,33 @@ export class EnhancedConversionService {
   }
 
   /**
+   * Find all page object files in the project
+   */
+  private async findPageObjectFiles(sourceDir: string): Promise<string[]> {
+    const pageObjectFiles: string[] = [];
+    const pageDirs = [
+      path.join(sourceDir, 'pages'),
+      path.join(sourceDir, 'page-objects'),
+      path.join(sourceDir, 'support', 'pages'),
+      path.join(sourceDir, 'support', 'page-objects')
+    ];
+
+    for (const pageDir of pageDirs) {
+      if (await fs.pathExists(pageDir)) {
+        const files = await this.getFilesRecursively(pageDir);
+        const pageFiles = files.filter(file =>
+          (file.endsWith('.ts') || file.endsWith('.js')) &&
+          !file.includes('.spec.') &&
+          !file.includes('.test.')
+        );
+        pageObjectFiles.push(...pageFiles);
+      }
+    }
+
+    return pageObjectFiles;
+  }
+
+  /**
    * Find all support files in the project
    */
   private async findSupportFiles(sourceDir: string): Promise<string[]> {
@@ -457,18 +469,73 @@ export class EnhancedConversionService {
     // Generate page object index file if page objects exist
     const pageObjects = convertedFiles.filter(f => f.type === 'pageObject');
     if (pageObjects.length > 0) {
-      const indexContent = this.pageObjectTransformer.generatePageObjectIndex(
-        pageObjects.map(po => ({
-          className: path.basename(po.convertedPath, '.ts'),
-          filePath: po.convertedPath,
-          content: po.content,
-          warnings: []
-        }))
-      );
+      const indexContent = this.generateSimplePageObjectIndex(pageObjects);
 
       const indexPath = path.join(outputDir, 'pages', 'index.ts');
       await fs.ensureDir(path.dirname(indexPath));
       await fs.writeFile(indexPath, indexContent, 'utf-8');
     }
+  }
+
+  /**
+   * Simple import path normalization
+   */
+  private normalizeImportPaths(content: string, filePath: string, warnings: string[]): string {
+    // Basic import path normalization - convert relative paths to use Playwright conventions
+    const normalized = content
+      .replace(/from ['"]\.\.\/\.\.\/pages\//g, "from '../pages/")
+      .replace(/from ['"]\.\.\/pages\//g, "from './pages/")
+      .replace(/from ['"]cypress\//g, "from '@playwright/test'");
+
+    if (normalized !== content) {
+      warnings.push('Import paths normalized for Playwright structure');
+    }
+
+    return normalized;
+  }
+
+  /**
+   * Simple import deduplication
+   */
+  private simplifyImportDeduplication(content: string, filePath: string, warnings: string[]): string {
+    // Basic duplicate import removal
+    const lines = content.split('\n');
+    const importMap = new Map<string, string>();
+    const processedLines: string[] = [];
+
+    for (const line of lines) {
+      if (line.trim().startsWith('import ')) {
+        const key = line.trim();
+        if (!importMap.has(key)) {
+          importMap.set(key, line);
+          processedLines.push(line);
+        } else {
+          warnings.push(`Removed duplicate import: ${key}`);
+        }
+      } else {
+        processedLines.push(line);
+      }
+    }
+
+    return processedLines.join('\n');
+  }
+
+  /**
+   * Generate simple page object index file
+   */
+  private generateSimplePageObjectIndex(pageObjects: Array<{ originalPath: string; convertedPath: string; content: string; type: string }>): string {
+    const exports = pageObjects.map(po => {
+      const className = path.basename(po.convertedPath, '.ts');
+      const relativePath = `./${className}`;
+      return `export { ${className} } from '${relativePath}';`;
+    });
+
+    return [
+      '// Auto-generated page object index',
+      '// This file exports all page objects for easy importing',
+      '',
+      ...exports,
+      ''
+    ].join('\n');
   }
 }

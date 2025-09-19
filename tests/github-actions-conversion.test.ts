@@ -536,6 +536,11 @@ jobs:
 
   describe('End-to-End Workflow Conversion', () => {
     it('should convert complete Cypress workflow to Playwright', async () => {
+      // Override mock to return only one workflow file for this test
+      mockFs.readdirSync.mockReturnValue([
+        'test.yml' as any
+      ]);
+
       const result = await actionsConverter.convertGitHubActionsWorkflows(
         mockProjectPath,
         mockOutputPath

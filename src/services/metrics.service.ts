@@ -373,4 +373,9 @@ export class MetricsService {
       memoryUsage: process.memoryUsage()
     };
   }
+
+  // Missing API method for routes
+  async getMetrics(): Promise<Record<string, any>> {
+    return this.getStats();
+  }
 }

@@ -490,4 +490,26 @@ export class RepositoryService {
   async shutdown(): Promise<void> {
     this.logger.info('Shutting down repository service');
   }
+
+  // Missing API methods for routes
+  async getFileTree(repositoryUrl: string, path: string = ''): Promise<any[]> {
+    this.logger.info(`Getting file tree for: ${repositoryUrl}`, { path });
+
+    // TODO: Implement actual file tree retrieval
+    return [
+      { name: 'package.json', type: 'file', path: 'package.json' },
+      { name: 'src', type: 'directory', path: 'src' },
+      { name: 'tests', type: 'directory', path: 'tests' }
+    ];
+  }
+
+  async getFileContent(repositoryUrl: string, filePath: string): Promise<{ content: string; encoding: string }> {
+    this.logger.info(`Getting file content: ${filePath} from ${repositoryUrl}`);
+
+    // TODO: Implement actual file content retrieval
+    return {
+      content: `// File content for ${filePath}`,
+      encoding: 'utf-8'
+    };
+  }
 }

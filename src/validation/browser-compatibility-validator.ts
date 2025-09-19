@@ -30,6 +30,7 @@ export interface DisplayModeResult {
   isSupported: boolean;
   requirements: string[];
   warnings: string[];
+  recommendations: string[];
 }
 
 export class BrowserCompatibilityValidator {
@@ -188,7 +189,8 @@ export class BrowserCompatibilityValidator {
     const result: DisplayModeResult = {
       isSupported: true,
       requirements: [],
-      warnings: []
+      warnings: [],
+      recommendations: []
     };
 
     try {

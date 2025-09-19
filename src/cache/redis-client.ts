@@ -227,6 +227,18 @@ export class RedisClient {
     return this.connected;
   }
 
+  async isHealthy(): Promise<boolean> {
+    try {
+      if (!this.connected) {
+        return false;
+      }
+      await this.ping();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   async shutdown(): Promise<void> {
     await this.disconnect();
   }

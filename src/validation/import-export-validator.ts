@@ -401,6 +401,11 @@ export class ImportExportValidator {
   }
 
   private hasExportModifier(node: ts.Node): boolean {
-    return node.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.ExportKeyword) ?? false;
+    // Check if the node has modifiers by using type guards
+    if (ts.canHaveModifiers(node)) {
+      const modifiers = ts.getModifiers(node);
+      return modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.ExportKeyword) ?? false;
+    }
+    return false;
   }
 }
