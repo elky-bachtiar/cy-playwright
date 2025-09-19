@@ -356,7 +356,10 @@ export class EnhancedConversionService {
     const testDirs = [
       path.join(sourceDir, 'e2e'),
       path.join(sourceDir, 'integration'),
-      path.join(sourceDir, 'component')
+      path.join(sourceDir, 'component'),
+      path.join(sourceDir, 'cypress', 'e2e'),
+      path.join(sourceDir, 'cypress', 'integration'),
+      path.join(sourceDir, 'cypress', 'component')
     ];
 
     for (const testDir of testDirs) {
@@ -382,7 +385,12 @@ export class EnhancedConversionService {
       path.join(sourceDir, 'pages'),
       path.join(sourceDir, 'page-objects'),
       path.join(sourceDir, 'support', 'pages'),
-      path.join(sourceDir, 'support', 'page-objects')
+      path.join(sourceDir, 'support', 'page-objects'),
+      path.join(sourceDir, 'cypress', 'pages'),
+      path.join(sourceDir, 'cypress', 'page-objects'),
+      path.join(sourceDir, 'cypress', 'pageObjects'),
+      path.join(sourceDir, 'cypress', 'support', 'pages'),
+      path.join(sourceDir, 'cypress', 'support', 'page-objects')
     ];
 
     for (const pageDir of pageDirs) {

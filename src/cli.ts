@@ -905,11 +905,15 @@ export class CLI {
       console.log(`📁 Converting: ${path.relative(clonedPath, selectedProjectPath) || '.'}`);;
 
       // Convert in-place - place Playwright files alongside Cypress files
-      await this.handleConversion({
+      await this.handleConversionEnhanced({
         sourceDir: selectedProjectPath,
         outputDir: selectedProjectPath, // Use same directory as source
         preserveStructure: options.preserveStructure,
         generatePageObjects: options.generatePageObjects,
+        preserveMethodChaining: true,
+        deduplicateImports: true,
+        transformImportPaths: true,
+        convertTestStructure: true,
         verbose: options.verbose
       });
 
@@ -1021,11 +1025,15 @@ export class CLI {
       console.log(`📁 Converting: ${path.relative(clonedPath, selectedProjectPath) || '.'}`);
 
       // Convert in-place - place Playwright files alongside Cypress files
-      await this.handleConversion({
+      await this.handleConversionEnhanced({
         sourceDir: selectedProjectPath,
         outputDir: selectedProjectPath, // Use same directory as source
         preserveStructure: options.preserveStructure,
         generatePageObjects: options.generatePageObjects,
+        preserveMethodChaining: true,
+        deduplicateImports: true,
+        transformImportPaths: true,
+        convertTestStructure: true,
         verbose: options.verbose
       });
 
